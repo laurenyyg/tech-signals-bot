@@ -1,0 +1,27 @@
+name: Why Pipeline
+
+on:
+  schedule:
+    - cron: "37 23 * * 5"  # Fridays 4:37 PM PDT
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Why pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WHY_WEBHOOK_URL: ${{ secrets.WHY_WEBHOOK_URL }}
+        run: python main.py --profile why

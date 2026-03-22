@@ -1,0 +1,27 @@
+name: What Pipeline
+
+on:
+  schedule:
+    - cron: "47 3 * * 1"  # Sundays 8:47 PM PDT (UTC-7) → Monday 03:47 UTC
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run What pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WHAT_WEBHOOK_URL: ${{ secrets.WHAT_WEBHOOK_URL }}
+        run: python main.py --profile what
