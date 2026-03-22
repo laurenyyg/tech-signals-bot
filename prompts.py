@@ -44,6 +44,12 @@ foundational protocols) over short-term price action or arbitrage plays.
 4. Cluster — Group related items into a single signal where the story is the same.
 5. Drop — Discard items with no structural significance: price updates, \
 partnership announcements, minor product launches, exchange listings.
+6. Thin but credible — If an item has no summary but concerns a direct \
+competitive move by a major AI lab (OpenAI, Anthropic, Google Gemini, \
+Meta AI, xAI, Mistral), keep it and reason from the headline alone. \
+Hiring targets, funding rounds, customer acquisition strategy, and model \
+release timelines from these players are structurally significant even \
+when detail is sparse.
 
 OUTPUT FORMAT:
 Each input item is prefixed with a numeric ID (e.g. "1.", "2."). \
