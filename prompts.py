@@ -11,7 +11,7 @@ Each element must match this schema exactly:
     "title": "<title>",
     "author": "<author name, empty string if unknown>",
     "published": "<published date — echo exactly from input>",
-    "summary": ["<bullet 1: core thesis>", "<bullet 2: second-order implication>", "..."],
+    "summary": ["*Core thesis:* <bullet>", "*Second-order implication:* <bullet>", "..."],
     "is_deep_read": <true if the piece warrants deep reading, false otherwise>,
     "content_type": "<essay or presentation — echo exactly from input>",
     "source_url": "<url>"
