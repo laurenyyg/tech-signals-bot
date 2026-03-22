@@ -32,6 +32,7 @@ class WhyFetcher(BaseFetcher):
     def __init__(self) -> None:
         self.source_counts: Dict[str, int] = {
             "stratechery": 0,
+            "stratechery-podcasts": 0,
             "deeplearning-ai": 0,
             "ben-evans-essays": 0,
             "ben-evans-presentations": 0,
@@ -47,9 +48,16 @@ class WhyFetcher(BaseFetcher):
         cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
         items: List[Dict[str, Any]] = []
 
-        strat_items = self._fetch_stratechery_rss(cutoff)
-        self.source_counts["stratechery"] = len(strat_items)
-        items.extend(strat_items)
+        article_items = self._fetch_stratechery_rss(cutoff)
+        podcast_items = self._fetch_stratechery_podcast_rss(cutoff)
+
+        article_titles = {item["title"].lower() for item in article_items}
+        deduped_podcasts = [p for p in podcast_items if p["title"].lower() not in article_titles]
+
+        self.source_counts["stratechery"] = len(article_items)
+        self.source_counts["stratechery-podcasts"] = len(deduped_podcasts)
+        items.extend(article_items)
+        items.extend(deduped_podcasts)
 
         dl_items = self._scrape_deeplearning_ai(cutoff)
         self.source_counts["deeplearning-ai"] = len(dl_items)
@@ -111,6 +119,54 @@ class WhyFetcher(BaseFetcher):
             logger.error(f"Error fetching stratechery RSS: {e}")
 
         logger.info(f"stratechery: {len(items)} article(s) in window")
+        return items
+
+    def _fetch_stratechery_podcast_rss(self, cutoff: datetime) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        rss_url = os.getenv("STRATECHERY_PODCAST_URL")
+        if not rss_url:
+            logger.warning("STRATECHERY_PODCAST_URL not set; skipping stratechery podcast")
+            return items
+        try:
+            feed = feedparser.parse(
+                rss_url,
+                agent=USER_AGENT,
+                handlers=[self._proxy_handler] if self._proxy_handler else [],
+            )
+            logger.info(f"Fetched {len(feed.entries)} entries from stratechery podcast RSS")
+
+            for entry in feed.entries:
+                try:
+                    published = self._parse_date(entry)
+                    if published and published < cutoff:
+                        continue
+
+                    title: str = getattr(entry, "title", "") or ""
+                    link: str = getattr(entry, "link", "") or ""
+
+                    content_list = getattr(entry, "content", None)
+                    if content_list:
+                        summary: str = content_list[0].get("value", "") or ""
+                    else:
+                        summary = getattr(entry, "summary", "") or ""
+
+                    items.append({
+                        "title": title,
+                        "author": "Ben Thompson",
+                        "summary": summary,
+                        "link": link,
+                        "source": "stratechery",
+                        "content_type": "podcast",
+                        "published": published.isoformat() if published else "",
+                        "needs_deep_read": self._check_deep_read(title, summary),
+                    })
+                except Exception as e:
+                    logger.error(f"Error parsing stratechery podcast RSS entry: {e}")
+
+        except Exception as e:
+            logger.error(f"Error fetching stratechery podcast RSS: {e}")
+
+        logger.info(f"stratechery-podcasts: {len(items)} episode(s) in window")
         return items
 
     def _scrape_deeplearning_ai(self, cutoff: datetime) -> List[Dict[str, Any]]:
