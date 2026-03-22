@@ -27,8 +27,9 @@ KEYWORD_WHITELIST: Dict[str, int] = {
     # AI / LLM
     "artificial intelligence": 3, "machine learning": 2,
     "llm": 3, "large language model": 3, "foundation model": 3,
-    "openai": 3, "claude": 3, "google": 3, "meta": 3, "facebook": 3,
-    "gpt": 2, "gemini": 2, "llama": 2,
+    "openai": 5, "anthropic": 5, "chatgpt": 5, "claude": 5,
+    "google": 5, "gemini": 4, "meta": 5, "facebook": 5,
+    "gpt": 2, "llama": 2,
     "neural": 2, "inference": 2, "fine-tuning": 2, "fine tuning": 2,
     "agent": 2, "rag": 2, "multimodal": 2, "reasoning": 2,
     "transformer": 2, "diffusion": 2, "open source model": 3,
@@ -126,6 +127,10 @@ class RssFetcher(BaseFetcher):
             f"keeping top {len(top_items)} (score threshold: "
             f"{top_items[-1]['score'] if top_items else 'n/a'})"
         )
+        for item in top_items:
+            logger.debug(
+                f"  [{item['score']:>3}] [{item['source'].upper()}] {item['title']}"
+            )
 
         self.source_counts = stage_counts
         return top_items
