@@ -17,7 +17,7 @@ Scrapes Techmeme and CoinDesk via RSS, scores items against a crypto/AI/infrastr
 **Why does it matter?**
 
 Scrapes long-form essays and presentations from:
-- **Stratechery** (Ben Thompson) — private subscriber RSS feed
+- **Stratechery** (Ben Thompson) — private subscriber RSS feed (articles + podcast with transcripts, deduplicated by title)
 - **DeepLearning.AI** (Andrew Ng) — Letters from Andrew Ng
 - **Ben-Evans** (Benedict Evans) — Essays and bi-annual presentations
 
@@ -44,11 +44,12 @@ Create a `.env` file in the project root:
 ANTHROPIC_API_KEY=your_key_here
 WHAT_WEBHOOK_URL=your_slack_webhook_here
 WHY_WEBHOOK_URL=your_slack_webhook_here
-STRATECHERY_RSS_URL=your_private_rss_url_here
+STRATECHERY_RSS_URL=your_private_article_rss_url_here
+STRATECHERY_PODCAST_URL=your_private_podcast_rss_url_here
 DATAIMPULSE_PROXY_URL=http://username:password@gw.dataimpulse.com:823
 ```
 
-`STRATECHERY_RSS_URL` is the private subscriber RSS URL from Stratechery (required for the Why profile).
+`STRATECHERY_RSS_URL` and `STRATECHERY_PODCAST_URL` are private subscriber URLs from Stratechery (both required for the Why profile). Find them in your Stratechery account settings.
 `DATAIMPULSE_PROXY_URL` is optional. If omitted, all requests fall back to a direct connection.
 
 **3. Run locally**
@@ -68,7 +69,8 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `WHAT_WEBHOOK_URL` | Slack webhook for the What digest |
 | `WHY_WEBHOOK_URL` | Slack webhook for the Why digest |
-| `STRATECHERY_RSS_URL` | Private Stratechery subscriber RSS URL |
+| `STRATECHERY_RSS_URL` | Private Stratechery article RSS URL |
+| `STRATECHERY_PODCAST_URL` | Private Stratechery podcast RSS URL |
 | `DATAIMPULSE_PROXY_URL` | Residential proxy URL (optional) |
 
 ---
@@ -80,7 +82,7 @@ main.py                  Entry point, argument routing, Anthropic call, Slack po
 ├── fetchers/
 │   ├── base_fetcher.py  Abstract base class
 │   ├── rss_fetcher.py   What profile — RSS + keyword scoring
-│   └── why_fetcher.py   Why profile — RSS (Stratechery) + HTML scrapers (DL.AI, Ben-Evans)
+│   └── why_fetcher.py   Why profile — RSS x2 (Stratechery articles + podcast) + HTML scrapers (DL.AI, Ben-Evans)
 ├── prompts.py           System prompts for each profile
 ├── models.py            Dataclasses (NewsSignal, WhySignal)
 └── config.py            DEEP_READ_KEYWORDS
@@ -101,6 +103,7 @@ main.py                  Entry point, argument routing, Anthropic call, Slack po
 | ❗️ | Deep read flagged |
 | 🧠 | Standard essay |
 | 🗂 | Presentation |
+| 🎙 | Podcast episode |
 
 ---
 
