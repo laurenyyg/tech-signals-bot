@@ -44,7 +44,10 @@ Create a `.env` file in the project root:
 ANTHROPIC_API_KEY=your_key_here
 WHAT_WEBHOOK_URL=your_slack_webhook_here
 WHY_WEBHOOK_URL=your_slack_webhook_here
+DATAIMPULSE_PROXY_URL=http://username:password@gw.dataimpulse.com:823
 ```
+
+`DATAIMPULSE_PROXY_URL` is optional. If omitted, all requests fall back to a direct connection.
 
 **3. Run locally**
 ```bash
@@ -63,6 +66,7 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `WHAT_WEBHOOK_URL` | Slack webhook for the What digest |
 | `WHY_WEBHOOK_URL` | Slack webhook for the Why digest |
+| `DATAIMPULSE_PROXY_URL` | Residential proxy URL (optional) |
 
 ---
 
