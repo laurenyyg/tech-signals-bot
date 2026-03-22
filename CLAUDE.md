@@ -19,13 +19,13 @@
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
 
 ### Why Profile
-- **Sources**: Stratechery (private subscriber RSS via `feedparser`), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations) — DL.AI and Ben-Evans use HTML scrapers with `BeautifulSoup` + `SoupStrainer`.
+- **Sources**: Stratechery (two private subscriber RSS feeds via `feedparser` — articles and podcast with transcripts; deduplicated by title, articles win), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations) — DL.AI and Ben-Evans use HTML scrapers with `BeautifulSoup` + `SoupStrainer`.
 - **Pre-filtering**: 7-day date window only. No scoring, no top-N cap.
 - **Deep-read flagging**: Case-insensitive keyword scan against `DEEP_READ_KEYWORDS` in `config.py`.
-- **LLM input**: Title, author, content type, summary excerpt, and URL included. 1-to-1 mapping (no clustering).
+- **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 400 chars), and URL included. 1-to-1 mapping (no clustering).
 
 ### Shared
-- **Environment**: Sensitive keys read from `.env` via `os.getenv`. Required: `ANTHROPIC_API_KEY`, `WHAT_WEBHOOK_URL`, `WHY_WEBHOOK_URL`, `STRATECHERY_RSS_URL` (Why profile). Optional: `DATAIMPULSE_PROXY_URL`.
+- **Environment**: Sensitive keys read from `.env` via `os.getenv`. Required: `ANTHROPIC_API_KEY`, `WHAT_WEBHOOK_URL`, `WHY_WEBHOOK_URL`, `STRATECHERY_RSS_URL`, `STRATECHERY_PODCAST_URL` (Why profile). Optional: `DATAIMPULSE_PROXY_URL`.
 - **Proxy**: If `DATAIMPULSE_PROXY_URL` is set, all `requests.get()` and `feedparser` calls use it. Falls back to direct if absent.
 
 ## LLM Configuration
@@ -47,7 +47,7 @@
 - 📈 **Second-Order Impact**: Infrastructure/long-term shift analysis.
 
 ### Why Profile Visual Hierarchy
-- ❗️ Deep read flagged (keyword match) · 🧠 Standard essay · 🗂 Presentation
+- ❗️ Deep read flagged (keyword match) · 🧠 Standard essay · 🗂 Presentation · 🎙 Podcast
 - Header line: `prefix *title* — _author_ · date`
 - Summary as bullet points, source link as final bullet.
 - Source counts per feed before FinOps footer.
