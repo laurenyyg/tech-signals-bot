@@ -47,6 +47,7 @@ PROFILES: Dict[str, Dict[str, Any]] = {
         "fetcher_cls": WhyFetcher,
         "system_prompt": WHY_PROFILE_PROMPT,
         "webhook_env": "WHY_WEBHOOK_URL",
+        "include_metadata": True,
     },
 }
 
@@ -55,17 +56,28 @@ PROFILES: Dict[str, Dict[str, Any]] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _format_items_for_prompt(items: List[Dict[str, Any]]) -> str:
+def _strip_html(text: str) -> str:
+    """Strip HTML tags and collapse whitespace."""
+    import re
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _format_items_for_prompt(
+    items: List[Dict[str, Any]], include_metadata: bool = False
+) -> str:
     lines: List[str] = []
     for i, item in enumerate(items, 1):
         lines.append(f"{i}. [{item['source'].upper()}] {item['title']}")
-        if item.get("author"):
-            lines.append(f"   Author: {item['author']}")
-        if item.get("content_type"):
-            lines.append(f"   Type: {item['content_type']}")
+        if include_metadata:
+            if item.get("author"):
+                lines.append(f"   Author: {item['author']}")
+            if item.get("content_type"):
+                lines.append(f"   Type: {item['content_type']}")
         if item.get("summary"):
-            lines.append(f"   Summary: {item['summary'][:400]}")
-        if item.get("link"):
+            clean_summary = _strip_html(item["summary"])[:400]
+            lines.append(f"   Summary: {clean_summary}")
+        if include_metadata and item.get("link"):
             lines.append(f"   URL: {item['link']}")
         lines.append("")
     return "\n".join(lines)
@@ -74,6 +86,7 @@ def _format_items_for_prompt(items: List[Dict[str, Any]]) -> str:
 def call_anthropic(
     items: List[Dict[str, Any]],
     system_prompt: str,
+    include_metadata: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Call the Anthropic API and return (signals, usage_meta).
 
@@ -88,7 +101,7 @@ def call_anthropic(
     user_message = (
         f"Analyse the following {len(items)} pre-scored news items and extract "
         f"paradigm-shifting signals per your mandate:\n\n"
-        + _format_items_for_prompt(items)
+        + _format_items_for_prompt(items, include_metadata=include_metadata)
     )
 
     try:
@@ -402,8 +415,24 @@ def main() -> None:
         source_counts: Dict[str, int] = getattr(fetcher, "source_counts", {})
 
         # 2. Analyse
-        signals, usage_meta = call_anthropic(items, profile["system_prompt"])
+        signals, usage_meta = call_anthropic(
+            items,
+            profile["system_prompt"],
+            include_metadata=profile.get("include_metadata", False),
+        )
         logger.info(f"LLM returned {len(signals)} signal(s)")
+
+        # 2a. Resolve source_ids → source_urls for What profile
+        if args.profile == "what":
+            id_to_url: Dict[int, str] = {
+                i: item.get("link", "") for i, item in enumerate(items, 1)
+            }
+            for signal in signals:
+                signal["source_urls"] = [
+                    id_to_url[sid]
+                    for sid in signal.pop("source_ids", [])
+                    if sid in id_to_url and id_to_url[sid]
+                ]
 
         # 3. Format
         if args.profile == "why":
