@@ -20,7 +20,7 @@
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
 
 ### Why Profile
-- **Sources**: Stratechery (two private subscriber RSS feeds via `feedparser` — articles and podcast with transcripts; deduplicated by title, articles win), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations) — DL.AI and Ben-Evans use HTML scrapers with `BeautifulSoup` + `SoupStrainer`.
+- **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z (newsletter essays; skips "Investing in" posts).
 - **Pre-filtering**: 7-day date window only. No scoring, no top-N cap.
 - **Deep-read flagging**: Case-insensitive keyword scan against `DEEP_READ_KEYWORDS` in `config.py`.
 - **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 400 chars), and URL included. 1-to-1 mapping (no clustering).
