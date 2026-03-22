@@ -23,11 +23,12 @@ KEYWORD_WHITELIST: Dict[str, int] = {
     "layer 2": 3, "l2": 3, "solana": 2, "stablecoin": 3, "cbdc": 3,
     "dao": 2, "protocol": 2, "consensus": 3, "proof of stake": 3,
     "proof of work": 3, "validator": 2, "smart contract": 2,
-    "dex": 2, "liquidity": 2, "yield": 1, "airdrop": 1,
+    "dex": 2, "liquidity": 2, "yield": 1,
     # AI / LLM
     "artificial intelligence": 3, "machine learning": 2,
     "llm": 3, "large language model": 3, "foundation model": 3,
-    "gpt": 2, "claude": 2, "gemini": 2, "llama": 2,
+    "openai": 3, "claude": 3, "google": 3, "meta": 3, "facebook": 3,
+    "gpt": 2, "gemini": 2, "llama": 2,
     "neural": 2, "inference": 2, "fine-tuning": 2, "fine tuning": 2,
     "agent": 2, "rag": 2, "multimodal": 2, "reasoning": 2,
     "transformer": 2, "diffusion": 2, "open source model": 3,
@@ -35,7 +36,7 @@ KEYWORD_WHITELIST: Dict[str, int] = {
     "semiconductor": 3, "chip": 2, "nvidia": 2, "amd": 2, "tsmc": 3,
     "quantum": 3, "gpu": 3, "tpu": 3, "datacenter": 2, "data center": 2,
     "compute": 2, "energy": 2, "power grid": 3, "nuclear": 2,
-    "cloud": 1, "api": 1, "open source": 2,
+    "cloud": 1, "open source": 2,
     # Macro / Regulation
     "regulation": 2, "sec": 2, "cftc": 2, "fed": 1, "federal reserve": 2,
     "interest rate": 2, "etf": 2, "institutional": 2, "treasury": 2,
@@ -113,6 +114,7 @@ class RssFetcher(BaseFetcher):
             except Exception as e:
                 logger.error(f"Error fetching feed '{source}' ({url}): {e}")
 
+        all_items = [item for item in all_items if item["score"] > 0]
         all_items.sort(key=lambda x: x["score"], reverse=True)
         top_items = all_items[:TOP_N]
 
