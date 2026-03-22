@@ -13,8 +13,9 @@
 ## Data Pipeline
 
 ### What Profile
-- **Sources**: Techmeme and CoinDesk via RSS (`feedparser`).
-- **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items first, then keep the top 40 highest-scoring items.
+- **Sources**: Techmeme, CoinDesk, and TechCrunch via RSS (`feedparser`).
+- **Cross-feed dedupe**: After the 7-day window, merge duplicates in `rss_fetcher.py`: first by normalized URL (strip `utm_*`, `fbclid`, `gclid`, etc.), then by normalized title (strip `| TechCrunch` / `- CoinDesk` style suffixes). On conflict: higher keyword score wins; tie-break newer `published`; if still tied, keep the first-seen row in dedupe order (roughly `FEEDS` order for URL pass).
+- **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts unique surviving rows per feed (not raw RSS rows).
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
 

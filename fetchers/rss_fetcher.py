@@ -1,8 +1,10 @@
 import logging
 import os
+import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import feedparser
 
@@ -13,7 +15,18 @@ logger = logging.getLogger(__name__)
 FEEDS: Dict[str, str] = {
     "techmeme": "https://www.techmeme.com/feed.xml",
     "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
+    "techcrunch": "https://techcrunch.com/feed/",
 }
+
+_TRACKING_QUERY_EXACT = frozenset(
+    {"fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "_ga"}
+)
+
+# Strip trailing " | TechCrunch" / " - CoinDesk" style suffixes for title-level dedupe.
+_TITLE_SUFFIX_RE = re.compile(
+    r"\s*([|–—\-])\s*(techcrunch|coindesk|techmeme)\s*$",
+    re.IGNORECASE,
+)
 
 # Keyword → score weight. Higher = more relevant to the Crypto/AI/Tech focus.
 KEYWORD_WHITELIST: Dict[str, int] = {
@@ -55,10 +68,106 @@ USER_AGENT = (
 )
 
 
+def _normalize_url(link: str) -> str:
+    """Stable key for cross-feed dedupe: host/path + query without tracking params."""
+    raw = (link or "").strip()
+    if not raw:
+        return ""
+    try:
+        p = urlparse(raw)
+        scheme = (p.scheme or "https").lower()
+        netloc = p.netloc.lower()
+        path = p.path or ""
+        if len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/")
+        query = ""
+        if p.query:
+            pairs = parse_qsl(p.query, keep_blank_values=True)
+            kept = [
+                (k, v)
+                for k, v in pairs
+                if k.lower() not in _TRACKING_QUERY_EXACT
+                and not k.lower().startswith("utm_")
+            ]
+            query = urlencode(kept) if kept else ""
+        return urlunparse((scheme, netloc, path, "", query, ""))
+    except Exception:
+        return raw.lower()
+
+
+def _normalize_title(title: str) -> str:
+    t = " ".join((title or "").strip().lower().split())
+    t = _TITLE_SUFFIX_RE.sub("", t).strip()
+    return t
+
+
+def _parse_iso_datetime(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def _better_item(incumbent: Dict[str, Any], challenger: Dict[str, Any]) -> Dict[str, Any]:
+    """Prefer higher score, then newer published, then incumbent (feed order wins)."""
+    if challenger["score"] > incumbent["score"]:
+        return challenger
+    if challenger["score"] < incumbent["score"]:
+        return incumbent
+    da = _parse_iso_datetime(incumbent.get("published", ""))
+    db = _parse_iso_datetime(challenger.get("published", ""))
+    if da and db:
+        return incumbent if da >= db else challenger
+    if da and not db:
+        return incumbent
+    if db and not da:
+        return challenger
+    return incumbent
+
+
+def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Two-pass dedupe: normalized URL, then normalized title (same story, different links)."""
+    if not items:
+        return []
+
+    by_url: Dict[str, Dict[str, Any]] = {}
+    no_url: List[Dict[str, Any]] = []
+    for item in items:
+        uk = _normalize_url(item.get("link", ""))
+        if not uk:
+            no_url.append(item)
+            continue
+        if uk not in by_url:
+            by_url[uk] = item
+        else:
+            by_url[uk] = _better_item(by_url[uk], item)
+
+    merged = list(by_url.values()) + no_url
+
+    by_title: Dict[str, Dict[str, Any]] = {}
+    no_title: List[Dict[str, Any]] = []
+    for item in merged:
+        tk = _normalize_title(item.get("title", ""))
+        if not tk:
+            no_title.append(item)
+            continue
+        if tk not in by_title:
+            by_title[tk] = item
+        else:
+            by_title[tk] = _better_item(by_title[tk], item)
+
+    return list(by_title.values()) + no_title
+
+
 class RssFetcher(BaseFetcher):
     def __init__(self) -> None:
         # Populated during fetch(). Each source maps to a dict of stage → count:
-        # fetched, in_window, relevant (score > 0), sent_to_llm (after top-N cut).
+        # fetched, in_window, relevant (unique score>0 after dedupe), sent_to_llm (after top-N cut).
         self.source_counts: Dict[str, Dict[str, int]] = {}
         proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
         self._proxy_handler = (
@@ -98,9 +207,6 @@ class RssFetcher(BaseFetcher):
                         link: str = getattr(entry, "link", "") or ""
                         score = self._score_item(title, summary)
 
-                        if score > 0:
-                            stage_counts[source]["relevant"] += 1
-
                         all_items.append({
                             "title": title,
                             "summary": summary,
@@ -114,6 +220,16 @@ class RssFetcher(BaseFetcher):
 
             except Exception as e:
                 logger.error(f"Error fetching feed '{source}' ({url}): {e}")
+
+        before_dedupe = len(all_items)
+        all_items = _dedupe_items(all_items)
+        logger.info(f"Dedupe: {before_dedupe} -> {len(all_items)} items")
+
+        for s in stage_counts:
+            stage_counts[s]["relevant"] = 0
+        for item in all_items:
+            if item["score"] > 0:
+                stage_counts[item["source"]]["relevant"] += 1
 
         all_items = [item for item in all_items if item["score"] > 0]
         all_items.sort(key=lambda x: x["score"], reverse=True)

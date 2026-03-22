@@ -9,7 +9,7 @@ A personal intelligence bot that scrapes curated tech and crypto sources, analys
 ### `--profile what`
 **What happened in tech this week?**
 
-Scrapes Techmeme and CoinDesk via RSS, scores items against a crypto/AI/infrastructure keyword whitelist, keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
+Scrapes Techmeme, CoinDesk, and TechCrunch via RSS, scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL, then normalized title), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
 
 **Schedule:** Sundays at 8:47 PM Vancouver time.
 
@@ -81,7 +81,7 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 main.py                  Entry point, argument routing, Anthropic call, Slack post
 ├── fetchers/
 │   ├── base_fetcher.py  Abstract base class
-│   ├── rss_fetcher.py   What profile — RSS + keyword scoring
+│   ├── rss_fetcher.py   What profile — RSS + keyword scoring + cross-feed dedupe
 │   └── why_fetcher.py   Why profile — RSS x2 (Stratechery articles + podcast) + HTML scrapers (DL.AI, Ben-Evans)
 ├── prompts.py           System prompts for each profile
 ├── models.py            Dataclasses (NewsSignal, WhySignal)
