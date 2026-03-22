@@ -1,4 +1,6 @@
 import logging
+import os
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -56,6 +58,11 @@ class RssFetcher(BaseFetcher):
         # Populated during fetch(). Each source maps to a dict of stage → count:
         # fetched, in_window, relevant (score > 0), sent_to_llm (after top-N cut).
         self.source_counts: Dict[str, Dict[str, int]] = {}
+        proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
+        self._proxy_handler = (
+            urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+            if proxy_url else None
+        )
 
     def fetch(self) -> List[Dict[str, Any]]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
@@ -68,7 +75,11 @@ class RssFetcher(BaseFetcher):
 
         for source, url in FEEDS.items():
             try:
-                feed = feedparser.parse(url, agent=USER_AGENT)
+                feed = feedparser.parse(
+                    url,
+                    agent=USER_AGENT,
+                    handlers=[self._proxy_handler] if self._proxy_handler else [],
+                )
                 stage_counts[source]["fetched"] = len(feed.entries)
                 logger.info(f"Fetched {len(feed.entries)} raw entries from {source}")
 

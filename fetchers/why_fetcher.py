@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,8 @@ class WhyFetcher(BaseFetcher):
             "ben-evans-essays": 0,
             "ben-evans-presentations": 0,
         }
+        proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
+        self._proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
     def fetch(self) -> List[Dict[str, Any]]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
@@ -63,6 +66,7 @@ class WhyFetcher(BaseFetcher):
             r = requests.get(
                 STRATECHERY_URL,
                 headers={"User-Agent": USER_AGENT},
+                proxies=self._proxies,
                 timeout=15,
             )
             r.raise_for_status()
@@ -125,6 +129,7 @@ class WhyFetcher(BaseFetcher):
             r = requests.get(
                 DEEPLEARNING_AI_URL,
                 headers={"User-Agent": USER_AGENT},
+                proxies=self._proxies,
                 timeout=15,
             )
             r.raise_for_status()
@@ -193,6 +198,7 @@ class WhyFetcher(BaseFetcher):
             r = requests.get(
                 BEN_EVANS_URL,
                 headers={"User-Agent": USER_AGENT},
+                proxies=self._proxies,
                 timeout=15,
             )
             r.raise_for_status()
