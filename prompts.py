@@ -46,6 +46,7 @@ foundational protocols) over short-term price action or arbitrage plays.
 partnership announcements, minor product launches, exchange listings.
 
 OUTPUT FORMAT:
+Each input item is prefixed with a numeric ID (e.g. "1.", "2."). \
 Return ONLY a valid JSON array — no markdown fences, no preamble, no commentary. \
 Each element must match this schema exactly:
 [
@@ -54,7 +55,7 @@ Each element must match this schema exactly:
     "core_fact": "<the single most important verifiable fact>",
     "eli5": "<simple mechanism breakdown in plain English>",
     "investment_impact": "<second-order infrastructure or long-term shift analysis>",
-    "source_urls": ["<url>", ...]
+    "source_ids": [<id>, ...]
   }
 ]
 
