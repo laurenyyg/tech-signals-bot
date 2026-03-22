@@ -25,4 +25,5 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WHY_WEBHOOK_URL: ${{ secrets.WHY_WEBHOOK_URL }}
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
+          STRATECHERY_RSS_URL: ${{ secrets.STRATECHERY_RSS_URL }}
         run: python main.py --profile why
