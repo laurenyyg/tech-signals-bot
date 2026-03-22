@@ -300,7 +300,9 @@ def build_why_slack_payload(
         content_type: str = signal.get("content_type", "essay")
         is_deep_read: bool = signal.get("is_deep_read", False)
 
-        if content_type == "presentation":
+        if content_type == "podcast":
+            prefix = "🎙"
+        elif content_type == "presentation":
             prefix = "🗂"
         elif is_deep_read:
             prefix = "❗️"
@@ -332,7 +334,12 @@ def build_why_slack_payload(
         if content_type == "presentation":
             header_line += "  `[Presentation]`"
 
-        read_label = "Find out more" if content_type == "presentation" else "Read essay"
+        if content_type == "presentation":
+            read_label = "Find out more"
+        elif content_type == "podcast":
+            read_label = "Read transcript"
+        else:
+            read_label = "Read essay"
 
         lines = [header_line]
         lines += [f"• {b}" for b in summary_bullets if b]

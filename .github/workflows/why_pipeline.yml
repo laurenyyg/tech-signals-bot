@@ -26,4 +26,5 @@ jobs:
           WHY_WEBHOOK_URL: ${{ secrets.WHY_WEBHOOK_URL }}
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
           STRATECHERY_RSS_URL: ${{ secrets.STRATECHERY_RSS_URL }}
+          STRATECHERY_PODCAST_URL: ${{ secrets.STRATECHERY_PODCAST_URL }}
         run: python main.py --profile why
