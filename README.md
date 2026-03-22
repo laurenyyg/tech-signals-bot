@@ -20,6 +20,7 @@ Scrapes long-form essays and presentations from:
 - **Stratechery** (Ben Thompson) — private subscriber RSS feed (articles + podcast with transcripts, deduplicated by title)
 - **DeepLearning.AI** (Andrew Ng) — Letters from Andrew Ng
 - **Ben-Evans** (Benedict Evans) — Essays and bi-annual presentations
+- **a16z** — Newsletter essays via Substack (investment announcements excluded)
 
 Filters to the last 7 days, flags deep reads against a keyword list, and asks Claude to summarise each piece as bullet points with core thesis and second-order implications.
 
@@ -82,7 +83,7 @@ main.py                  Entry point, argument routing, Anthropic call, Slack po
 ├── fetchers/
 │   ├── base_fetcher.py  Abstract base class
 │   ├── rss_fetcher.py   What profile — RSS + keyword scoring + cross-feed dedupe
-│   └── why_fetcher.py   Why profile — RSS x2 (Stratechery articles + podcast) + HTML scrapers (DL.AI, Ben-Evans)
+│   └── why_fetcher.py   Why profile — Stratechery RSS, DL.AI + Ben-Evans HTML scrapers, a16z Substack API
 ├── prompts.py           System prompts for each profile
 ├── models.py            Dataclasses (NewsSignal, WhySignal)
 └── config.py            DEEP_READ_KEYWORDS
@@ -90,7 +91,7 @@ main.py                  Entry point, argument routing, Anthropic call, Slack po
 
 ### Pre-LLM pipeline (Why profile)
 
-1. Scrape all 3 sources concurrently → raw item dicts
+1. Scrape all 4 sources concurrently → raw item dicts
 2. Drop items outside the 7-day window
 3. Flag `needs_deep_read` via keyword scan
 4. Serialise to numbered plaintext → user message

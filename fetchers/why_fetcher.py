@@ -27,6 +27,8 @@ DEEPLEARNING_AI_BASE = "https://www.deeplearning.ai"
 BEN_EVANS_URL = "https://www.ben-evans.com/"
 BEN_EVANS_BASE = "https://www.ben-evans.com"
 
+A16Z_ARCHIVE_URL = "https://www.a16z.news/api/v1/archive?sort=new&limit=25"
+
 
 class WhyFetcher(BaseFetcher):
     def __init__(self) -> None:
@@ -36,6 +38,7 @@ class WhyFetcher(BaseFetcher):
             "deeplearning-ai": 0,
             "ben-evans-essays": 0,
             "ben-evans-presentations": 0,
+            "a16z": 0,
         }
         proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
         self._proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
@@ -68,6 +71,10 @@ class WhyFetcher(BaseFetcher):
         self.source_counts["ben-evans-presentations"] = len(presentation_items)
         items.extend(essay_items)
         items.extend(presentation_items)
+
+        a16z_items = self._fetch_a16z(cutoff)
+        self.source_counts["a16z"] = len(a16z_items)
+        items.extend(a16z_items)
 
         logger.info(f"WhyFetcher: {len(items)} items in the last {DAYS_FILTER} days")
         return items
@@ -340,6 +347,67 @@ class WhyFetcher(BaseFetcher):
             logger.error(f"Error scraping ben-evans ({BEN_EVANS_URL}): {e}")
 
         return essays, presentations
+
+    def _fetch_a16z(self, cutoff: datetime) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        try:
+            r = requests.get(
+                A16Z_ARCHIVE_URL,
+                headers={"User-Agent": USER_AGENT},
+                proxies=self._proxies,
+                timeout=15,
+            )
+            r.raise_for_status()
+            posts = r.json()
+            logger.info(f"Fetched {len(posts)} posts from a16z archive")
+
+            for post in posts:
+                try:
+                    title: str = post.get("title", "") or ""
+                    if not title:
+                        continue
+                    if title.lower().startswith("investing in"):
+                        continue
+
+                    post_date_str: str = post.get("post_date", "") or ""
+                    published: Optional[datetime] = None
+                    if post_date_str:
+                        try:
+                            published = datetime.fromisoformat(post_date_str.replace("Z", "+00:00"))
+                            if published.tzinfo is None:
+                                published = published.replace(tzinfo=timezone.utc)
+                            else:
+                                published = published.astimezone(timezone.utc)
+                        except ValueError:
+                            pass
+
+                    if published and published < cutoff:
+                        continue
+
+                    bylines = post.get("publishedBylines", [])
+                    author: str = bylines[0]["name"] if bylines and bylines[0].get("name") else "a16z"
+
+                    summary: str = post.get("description", "") or ""
+                    link: str = post.get("canonical_url", "") or ""
+
+                    items.append({
+                        "title": title,
+                        "author": author,
+                        "summary": summary,
+                        "link": link,
+                        "source": "a16z",
+                        "content_type": "essay",
+                        "published": published.isoformat() if published else "",
+                        "needs_deep_read": self._check_deep_read(title, summary),
+                    })
+                except Exception as e:
+                    logger.error(f"Error parsing a16z post: {e}")
+
+        except Exception as e:
+            logger.error(f"Error fetching a16z archive ({A16Z_ARCHIVE_URL}): {e}")
+
+        logger.info(f"a16z: {len(items)} post(s) in window")
+        return items
 
     def _parse_human_date(self, date_str: str) -> Optional[datetime]:
         """Parse dates like 'Feb 19, 2026' or 'Nov 2025' (treated as Nov 1)."""
