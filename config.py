@@ -1,6 +1,8 @@
 """Shared configuration constants for the Tech Signals Bot."""
 from typing import List
 
+SUMMARY_TRUNCATE_CHARS: int = 1500
+
 DEEP_READ_KEYWORDS: List[str] = [
     "artificial intelligence",
     "moat",

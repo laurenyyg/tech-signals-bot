@@ -29,6 +29,8 @@ BEN_EVANS_BASE = "https://www.ben-evans.com"
 
 A16Z_ARCHIVE_URL = "https://www.a16z.news/api/v1/archive?sort=new&limit=25"
 
+ONE_USEFUL_THING_URL = "https://www.oneusefulthing.org/feed"
+
 
 class WhyFetcher(BaseFetcher):
     def __init__(self) -> None:
@@ -39,6 +41,7 @@ class WhyFetcher(BaseFetcher):
             "ben-evans-essays": 0,
             "ben-evans-presentations": 0,
             "a16z": 0,
+            "one-useful-thing": 0,
         }
         proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
         self._proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
@@ -75,6 +78,10 @@ class WhyFetcher(BaseFetcher):
         a16z_items = self._fetch_a16z(cutoff)
         self.source_counts["a16z"] = len(a16z_items)
         items.extend(a16z_items)
+
+        one_useful_thing_items = self._fetch_one_useful_thing_rss(cutoff)
+        self.source_counts["one-useful-thing"] = len(one_useful_thing_items)
+        items.extend(one_useful_thing_items)
 
         logger.info(f"WhyFetcher: {len(items)} items in the last {DAYS_FILTER} days")
         return items
@@ -407,6 +414,50 @@ class WhyFetcher(BaseFetcher):
             logger.error(f"Error fetching a16z archive ({A16Z_ARCHIVE_URL}): {e}")
 
         logger.info(f"a16z: {len(items)} post(s) in window")
+        return items
+
+    def _fetch_one_useful_thing_rss(self, cutoff: datetime) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        try:
+            feed = feedparser.parse(
+                ONE_USEFUL_THING_URL,
+                agent=USER_AGENT,
+                handlers=[self._proxy_handler] if self._proxy_handler else [],
+            )
+            logger.info(f"Fetched {len(feed.entries)} entries from one-useful-thing RSS")
+
+            for entry in feed.entries:
+                try:
+                    published = self._parse_date(entry)
+                    if published and published < cutoff:
+                        continue
+
+                    title: str = getattr(entry, "title", "") or ""
+                    link: str = getattr(entry, "link", "") or ""
+
+                    content_list = getattr(entry, "content", None)
+                    if content_list:
+                        summary: str = content_list[0].get("value", "") or ""
+                    else:
+                        summary = getattr(entry, "summary", "") or ""
+
+                    items.append({
+                        "title": title,
+                        "author": "Ethan Mollick",
+                        "summary": summary,
+                        "link": link,
+                        "source": "one-useful-thing",
+                        "content_type": "essay",
+                        "published": published.isoformat() if published else "",
+                        "needs_deep_read": self._check_deep_read(title, summary),
+                    })
+                except Exception as e:
+                    logger.error(f"Error parsing one-useful-thing RSS entry: {e}")
+
+        except Exception as e:
+            logger.error(f"Error fetching one-useful-thing RSS ({ONE_USEFUL_THING_URL}): {e}")
+
+        logger.info(f"one-useful-thing: {len(items)} post(s) in window")
         return items
 
     def _parse_human_date(self, date_str: str) -> Optional[datetime]:

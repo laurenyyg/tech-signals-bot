@@ -19,6 +19,7 @@ import anthropic
 import requests
 from dotenv import load_dotenv
 
+from config import SUMMARY_TRUNCATE_CHARS
 from fetchers.rss_fetcher import DAYS_FILTER, RssFetcher
 from fetchers.why_fetcher import WhyFetcher
 from models import NewsSignal
@@ -75,7 +76,7 @@ def _format_items_for_prompt(
             if item.get("content_type"):
                 lines.append(f"   Type: {item['content_type']}")
         if item.get("summary"):
-            clean_summary = _strip_html(item["summary"])[:400]
+            clean_summary = _strip_html(item["summary"])[:SUMMARY_TRUNCATE_CHARS]
             lines.append(f"   Summary: {clean_summary}")
         if include_metadata and item.get("link"):
             lines.append(f"   URL: {item['link']}")
