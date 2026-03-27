@@ -1,0 +1,37 @@
+name: How Pipeline - Daily Catcher
+
+on:
+  schedule:
+    - cron: "17 4,16 * * *"  # Twice daily with jitter
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-catcher:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run How catcher
+        env:
+          DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
+        run: python catch_how.py
+
+      - name: Commit and push backlog
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/how_backlog.json
+          git diff --cached --quiet || git commit -m "chore: update how_backlog.json [skip ci]"
+          git push
