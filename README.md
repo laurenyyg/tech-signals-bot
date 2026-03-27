@@ -9,7 +9,7 @@ A personal intelligence bot that scrapes curated tech and crypto sources, analys
 ### `--profile what`
 **What happened in tech this week?**
 
-Scrapes Techmeme, CoinDesk, TechCrunch, and OpenAI News via RSS, plus Anthropic news and research via their public Sanity CMS API. Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL, then normalized title), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
+Scrapes Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS, plus Anthropic news and research via their public Sanity CMS API. Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL → normalized title → semantic dedup via Claude Haiku for cross-language duplicates), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
 
 **Schedule:** Sundays at 8:47 PM Vancouver time.
 

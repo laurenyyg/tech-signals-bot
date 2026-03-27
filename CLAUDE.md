@@ -13,8 +13,8 @@
 ## Data Pipeline
 
 ### What Profile
-- **Sources**: Techmeme, CoinDesk, TechCrunch, and OpenAI News via RSS (`feedparser`); Anthropic news and research via Sanity CMS API (public JSON endpoint, no RSS).
-- **Cross-feed dedupe**: After the 7-day window, merge duplicates in `rss_fetcher.py`: first by normalized URL (strip `utm_*`, `fbclid`, `gclid`, etc.), then by normalized title (strip `| TechCrunch` / `- CoinDesk` style suffixes). On conflict: higher keyword score wins; tie-break newer `published`; if still tied, keep the first-seen row in dedupe order (roughly `FEEDS` order for URL pass).
+- **Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS (`feedparser`); Anthropic news and research via Sanity CMS API (public JSON endpoint, no RSS).
+- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalized URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalized title (strip `| TechCrunch` / `- CoinDesk` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event, catching cross-language duplicates (e.g. Chinese 机器之心 article vs English coverage). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
 - **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts unique surviving rows per feed (not raw RSS rows).
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
@@ -33,7 +33,7 @@
 - **Model**: `claude-sonnet-4-6`
 - **Thinking**: `{"type": "adaptive"}`
 - **Max tokens**: 16,000 output token budget.
-- **Persona (What)**: Ruthless intelligence analyst — no PR fluff, ELI5 mechanics, Boglehead investment lens, cluster related items, drop non-structural noise.
+- **Persona (What)**: Ruthless intelligence analyst — no PR fluff, ELI5 mechanics, Boglehead investment lens, cluster related items, drop non-structural noise. Focus areas: AI model releases/breakthroughs, real-world AI impact evidence (productivity compression, economic displacement data), crypto protocol shifts, semiconductor/compute infra, and structural regulation.
 - **Persona (Why)**: Strategic intelligence analyst — dense bullet-point summaries extracting core thesis and second-order infrastructure/economic implications.
 
 ## Slack Message Formatting

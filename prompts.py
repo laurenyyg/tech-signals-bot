@@ -30,6 +30,7 @@ Ruthlessly discard noise, PR, and incremental non-events.
 
 FOCUS AREAS:
 - AI model releases, architectural breakthroughs, capability step-changes
+- Real-world AI impact evidence — quantified productivity compression, autonomous task completion milestones, or economic displacement data published by major AI labs
 - Crypto protocol upgrades, consensus changes, institutional adoption shifts
 - Semiconductor, compute, and energy infrastructure developments
 - Regulatory frameworks with structural, second-order consequences
