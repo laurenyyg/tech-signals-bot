@@ -24,6 +24,7 @@ from fetchers.rss_fetcher import DAYS_FILTER, RssFetcher
 from fetchers.why_fetcher import WhyFetcher
 from models import NewsSignal
 from prompts import WHAT_PROFILE_PROMPT, WHY_PROFILE_PROMPT
+from sheets_writer import append_what_run, compute_relevant_per_source
 
 load_dotenv()
 
@@ -441,6 +442,11 @@ def main() -> None:
                     for sid in signal.pop("source_ids", [])
                     if sid in id_to_url and id_to_url[sid]
                 ]
+
+        # 2b. Track source performance in Google Sheets (What profile only)
+        if args.profile == "what":
+            relevant_per_source = compute_relevant_per_source(signals, items)
+            append_what_run(source_counts, relevant_per_source)
 
         # 3. Format
         if args.profile == "why":
