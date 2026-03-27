@@ -24,7 +24,10 @@ FEEDS: Dict[str, str] = {
     "jiqizhixin": "https://wechat2rss.xlab.app/feed/51e92aad2728acdd1fda7314be32b16639353001.xml",
 }
 
-SANITY_API_URL = "https://4zrzovbb.api.sanity.io/v2023-05-03/data/query/website"
+ANTHROPIC_PAGES: Dict[str, str] = {
+    "anthropic_news": "https://www.anthropic.com/news",
+    "anthropic_research": "https://www.anthropic.com/research",
+}
 ANTHROPIC_SOURCES: Tuple[str, ...] = ("anthropic_news", "anthropic_research")
 
 _TRACKING_QUERY_EXACT = frozenset(
@@ -139,19 +142,55 @@ def _better_item(incumbent: Dict[str, Any], challenger: Dict[str, Any]) -> Dict[
     return incumbent
 
 
-def _extract_portable_text(blocks: List[Any]) -> str:
-    """Extract plain text from a Sanity Portable Text block array, truncated to 400 chars."""
-    parts: List[str] = []
-    try:
-        for block in (blocks or []):
-            if block.get("_type") != "block":
-                continue
-            for child in block.get("children", []):
-                if child.get("_type") == "span":
-                    parts.append(child.get("text", ""))
-    except Exception:
-        pass
-    return " ".join(parts)[:SUMMARY_TRUNCATE_CHARS]
+def _parse_anthropic_ssr(html: str, cutoff: datetime) -> List[Dict[str, Any]]:
+    """Extract post records from the Next.js SSR payload embedded in Anthropic page HTML.
+
+    The page embeds data as escaped JSON inside self.__next_f.push([1,"..."]) script tags.
+    Post objects always follow the field ordering: directories → illustration →
+    publishedOn → slug → subjects → summary → title.
+    """
+    # Find the script tag that holds publishedOn data
+    raw = ""
+    for script in re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL):
+        if "publishedOn" in script:
+            raw = script
+            break
+    if not raw:
+        return []
+
+    # Each post in the SSR payload serialises as (after the illustration block):
+    #   \"publishedOn\":\"DATE\",\"slug\":{\"_type\":\"slug\",\"current\":\"SLUG\"},
+    #   \"subjects\":[...],\"summary\":\"SUMMARY\",\"title\":\"TITLE\"
+    post_re = re.compile(
+        r'\\"publishedOn\\":\\"([^\\"]+)\\"'               # group 1: publishedOn
+        r',\\"slug\\":{\\"_type\\":\\"slug\\"'
+        r',\\"current\\":\\"([^\\"]+)\\"}'                 # group 2: slug
+        r'.*?'                                             # subjects array (non-greedy)
+        r',\\"summary\\":\\"([^\\"]*)\\"'                  # group 3: summary
+        r',\\"title\\":\\"([^\\"]+)\\"',                   # group 4: title
+        re.DOTALL,
+    )
+
+    posts: List[Dict[str, Any]] = []
+    seen_slugs: set = set()
+
+    for m in post_re.finditer(raw):
+        published_str, slug, summary, title = m.group(1), m.group(2), m.group(3), m.group(4)
+
+        if slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+
+        try:
+            published_dt = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if published_dt < cutoff:
+            continue
+
+        posts.append({"slug": slug, "published": published_str, "title": title, "summary": summary})
+
+    return posts
 
 
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -339,56 +378,51 @@ class RssFetcher(BaseFetcher):
         cutoff: datetime,
         stage_counts: Dict[str, Dict[str, int]],
     ) -> List[Dict[str, Any]]:
-        """Fetch recent Anthropic news and research posts from the Sanity CMS API."""
-        groq = (
-            '*[_type=="post" && publishedOn > "{cutoff}"] | order(publishedOn desc) {{'
-            'title, "slug": slug.current, publishedOn, summary, body, '
-            '"directory": directories[0].value}}'
-        ).format(cutoff=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        """Fetch recent Anthropic news and research posts by scraping the SSR page HTML.
 
+        The Sanity GROQ public API no longer returns data (dataset is now private).
+        Both pages embed post records as escaped JSON in Next.js SSR script tags.
+        """
         proxies: Dict[str, str] = {}
         proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
         if proxy_url:
             proxies = {"http": proxy_url, "https": proxy_url}
 
-        resp = requests.get(
-            SANITY_API_URL,
-            params={"query": groq},
-            headers={"User-Agent": USER_AGENT},
-            proxies=proxies or None,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        posts = resp.json().get("result", [])
-
         items: List[Dict[str, Any]] = []
-        for post in posts:
+
+        for source, url in ANTHROPIC_PAGES.items():
+            directory = source.replace("anthropic_", "")  # "news" or "research"
             try:
-                directory: str = post.get("directory") or ""
-                if directory not in ("news", "research"):
-                    continue
-                source = f"anthropic_{directory}"
-                slug: str = post.get("slug") or ""
-                link = f"https://www.anthropic.com/{directory}/{slug}"
-                title: str = post.get("title") or ""
-                body_text = _extract_portable_text(post.get("body") or [])
-                summary: str = body_text or (post.get("summary") or "")
-                published: str = post.get("publishedOn") or ""
+                resp = requests.get(
+                    url,
+                    headers={"User-Agent": USER_AGENT},
+                    proxies=proxies or None,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                posts = _parse_anthropic_ssr(resp.text, cutoff)
 
-                stage_counts[source]["fetched"] += 1
-                stage_counts[source]["in_window"] += 1
+                for post in posts:
+                    slug: str = post["slug"]
+                    title: str = post["title"]
+                    summary: str = post["summary"]
+                    published: str = post["published"]
+                    link = f"https://www.anthropic.com/{directory}/{slug}"
 
-                score = self._score_item(title, summary)
-                items.append({
-                    "title": title,
-                    "summary": summary,
-                    "link": link,
-                    "source": source,
-                    "published": published,
-                    "score": score,
-                })
+                    stage_counts[source]["fetched"] += 1
+                    stage_counts[source]["in_window"] += 1
+
+                    score = self._score_item(title, summary)
+                    items.append({
+                        "title": title,
+                        "summary": summary,
+                        "link": link,
+                        "source": source,
+                        "published": published,
+                        "score": score,
+                    })
             except Exception as e:
-                logger.error(f"Error parsing Anthropic post: {e}")
+                logger.error(f"Error fetching Anthropic {directory} page: {e}")
 
         logger.info(
             f"Fetched {stage_counts['anthropic_news']['fetched']} raw entries from anthropic_news, "

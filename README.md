@@ -9,7 +9,7 @@ A personal intelligence bot that scrapes curated tech and crypto sources, analys
 ### `--profile what`
 **What happened in tech this week?**
 
-Scrapes Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS, plus Anthropic news and research via their public Sanity CMS API. Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL → normalized title → semantic dedup via Claude Haiku for cross-language duplicates), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
+Scrapes Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS, plus Anthropic news and research by scraping their SSR page HTML (the Sanity CMS public API is no longer accessible without auth). Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL → normalized title → semantic dedup via Claude Haiku for cross-language duplicates), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications. After each run, per-source performance stats (articles in window, LLM-relevant count, ratio) are appended to a Google Spreadsheet.
 
 **Schedule:** Sundays at 8:47 PM Vancouver time.
 
@@ -49,10 +49,13 @@ WHY_WEBHOOK_URL=your_slack_webhook_here
 STRATECHERY_RSS_URL=your_private_article_rss_url_here
 STRATECHERY_PODCAST_URL=your_private_podcast_rss_url_here
 DATAIMPULSE_PROXY_URL=http://username:password@gw.dataimpulse.com:823
+GOOGLE_SPREADSHEET_ID=your_spreadsheet_id_here
+GOOGLE_SERVICE_ACCOUNT_PATH=information-source-digest-0a187c6dd85d.json
 ```
 
 `STRATECHERY_RSS_URL` and `STRATECHERY_PODCAST_URL` are private subscriber URLs from Stratechery (both required for the Why profile). Find them in your Stratechery account settings.
 `DATAIMPULSE_PROXY_URL` is optional. If omitted, all requests fall back to a direct connection.
+`GOOGLE_SPREADSHEET_ID` and `GOOGLE_SERVICE_ACCOUNT_PATH` are required for the What profile's performance tracking. Place the Google Cloud service account JSON in the project root and add it to `.gitignore`.
 
 **3. Run locally**
 ```bash
@@ -74,6 +77,8 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 | `STRATECHERY_RSS_URL` | Private Stratechery article RSS URL |
 | `STRATECHERY_PODCAST_URL` | Private Stratechery podcast RSS URL |
 | `DATAIMPULSE_PROXY_URL` | Residential proxy URL (optional) |
+| `GOOGLE_SPREADSHEET_ID` | Spreadsheet ID for What profile performance tracking |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full contents of the Google Cloud service account JSON file |
 
 ---
 
@@ -83,8 +88,9 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 main.py                  Entry point, argument routing, Anthropic call, Slack post
 ├── fetchers/
 │   ├── base_fetcher.py  Abstract base class
-│   ├── rss_fetcher.py   What profile — RSS feeds + Anthropic Sanity CMS API, keyword scoring, cross-feed dedupe
+│   ├── rss_fetcher.py   What profile — RSS feeds + Anthropic SSR scraper, keyword scoring, cross-feed dedupe
 │   └── why_fetcher.py   Why profile — Stratechery RSS, DL.AI + Ben-Evans HTML scrapers, a16z Substack API, One Useful Thing RSS
+├── sheets_writer.py     What profile — appends per-source performance stats to Google Sheets after each run
 ├── prompts.py           System prompts for each profile
 ├── models.py            Dataclasses (NewsSignal, WhySignal)
 └── config.py            DEEP_READ_KEYWORDS, SUMMARY_TRUNCATE_CHARS
