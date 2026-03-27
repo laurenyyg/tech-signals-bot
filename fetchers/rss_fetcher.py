@@ -3,11 +3,13 @@ import os
 import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import feedparser
+import requests
 
+from config import SUMMARY_TRUNCATE_CHARS
 from fetchers.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -16,7 +18,11 @@ FEEDS: Dict[str, str] = {
     "techmeme": "https://www.techmeme.com/feed.xml",
     "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
     "techcrunch": "https://techcrunch.com/feed/",
+    "openai_news": "https://openai.com/news/rss.xml",
 }
+
+SANITY_API_URL = "https://4zrzovbb.api.sanity.io/v2023-05-03/data/query/website"
+ANTHROPIC_SOURCES: Tuple[str, ...] = ("anthropic_news", "anthropic_research")
 
 _TRACKING_QUERY_EXACT = frozenset(
     {"fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "_ga"}
@@ -130,6 +136,21 @@ def _better_item(incumbent: Dict[str, Any], challenger: Dict[str, Any]) -> Dict[
     return incumbent
 
 
+def _extract_portable_text(blocks: List[Any]) -> str:
+    """Extract plain text from a Sanity Portable Text block array, truncated to 400 chars."""
+    parts: List[str] = []
+    try:
+        for block in (blocks or []):
+            if block.get("_type") != "block":
+                continue
+            for child in block.get("children", []):
+                if child.get("_type") == "span":
+                    parts.append(child.get("text", ""))
+    except Exception:
+        pass
+    return " ".join(parts)[:SUMMARY_TRUNCATE_CHARS]
+
+
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Two-pass dedupe: normalized URL, then normalized title (same story, different links)."""
     if not items:
@@ -181,7 +202,7 @@ class RssFetcher(BaseFetcher):
 
         stage_counts: Dict[str, Dict[str, int]] = {
             source: {"fetched": 0, "in_window": 0, "relevant": 0, "sent_to_llm": 0}
-            for source in FEEDS
+            for source in list(FEEDS) + list(ANTHROPIC_SOURCES)
         }
 
         for source, url in FEEDS.items():
@@ -220,6 +241,12 @@ class RssFetcher(BaseFetcher):
 
             except Exception as e:
                 logger.error(f"Error fetching feed '{source}' ({url}): {e}")
+
+        try:
+            anthropic_items = self._fetch_anthropic(cutoff, stage_counts)
+            all_items.extend(anthropic_items)
+        except Exception as e:
+            logger.error(f"Error fetching Anthropic content: {e}")
 
         before_dedupe = len(all_items)
         all_items = _dedupe_items(all_items)
@@ -263,6 +290,68 @@ class RssFetcher(BaseFetcher):
             except Exception:
                 pass
         return None
+
+    def _fetch_anthropic(
+        self,
+        cutoff: datetime,
+        stage_counts: Dict[str, Dict[str, int]],
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent Anthropic news and research posts from the Sanity CMS API."""
+        groq = (
+            '*[_type=="post" && publishedOn > "{cutoff}"] | order(publishedOn desc) {{'
+            'title, "slug": slug.current, publishedOn, summary, body, '
+            '"directory": directories[0].value}}'
+        ).format(cutoff=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+        proxies: Dict[str, str] = {}
+        proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
+        if proxy_url:
+            proxies = {"http": proxy_url, "https": proxy_url}
+
+        resp = requests.get(
+            SANITY_API_URL,
+            params={"query": groq},
+            headers={"User-Agent": USER_AGENT},
+            proxies=proxies or None,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        posts = resp.json().get("result", [])
+
+        items: List[Dict[str, Any]] = []
+        for post in posts:
+            try:
+                directory: str = post.get("directory") or ""
+                if directory not in ("news", "research"):
+                    continue
+                source = f"anthropic_{directory}"
+                slug: str = post.get("slug") or ""
+                link = f"https://www.anthropic.com/{directory}/{slug}"
+                title: str = post.get("title") or ""
+                body_text = _extract_portable_text(post.get("body") or [])
+                summary: str = body_text or (post.get("summary") or "")
+                published: str = post.get("publishedOn") or ""
+
+                stage_counts[source]["fetched"] += 1
+                stage_counts[source]["in_window"] += 1
+
+                score = self._score_item(title, summary)
+                items.append({
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "source": source,
+                    "published": published,
+                    "score": score,
+                })
+            except Exception as e:
+                logger.error(f"Error parsing Anthropic post: {e}")
+
+        logger.info(
+            f"Fetched {stage_counts['anthropic_news']['fetched']} raw entries from anthropic_news, "
+            f"{stage_counts['anthropic_research']['fetched']} from anthropic_research"
+        )
+        return items
 
     def _score_item(self, title: str, summary: str) -> int:
         text = (title + " " + summary).lower()

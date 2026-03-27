@@ -20,10 +20,10 @@
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
 
 ### Why Profile
-- **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z (newsletter essays; skips "Investing in" posts).
+- **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z (newsletter essays; skips "Investing in" posts), One Useful Thing (Ethan Mollick; public RSS).
 - **Pre-filtering**: 7-day date window only. No scoring, no top-N cap.
 - **Deep-read flagging**: Case-insensitive keyword scan against `DEEP_READ_KEYWORDS` in `config.py`.
-- **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 400 chars), and URL included. 1-to-1 mapping (no clustering).
+- **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 1500 chars via `SUMMARY_TRUNCATE_CHARS` in `config.py`), and URL included. 1-to-1 mapping (no clustering).
 
 ### Shared
 - **Environment**: Sensitive keys read from `.env` via `os.getenv`. Required: `ANTHROPIC_API_KEY`, `WHAT_WEBHOOK_URL`, `WHY_WEBHOOK_URL`, `STRATECHERY_RSS_URL`, `STRATECHERY_PODCAST_URL` (Why profile). Optional: `DATAIMPULSE_PROXY_URL`.
