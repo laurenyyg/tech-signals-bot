@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -6,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+import anthropic
 import feedparser
 import requests
 
@@ -19,6 +21,7 @@ FEEDS: Dict[str, str] = {
     "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
     "techcrunch": "https://techcrunch.com/feed/",
     "openai_news": "https://openai.com/news/rss.xml",
+    "jiqizhixin": "https://wechat2rss.xlab.app/feed/51e92aad2728acdd1fda7314be32b16639353001.xml",
 }
 
 SANITY_API_URL = "https://4zrzovbb.api.sanity.io/v2023-05-03/data/query/website"
@@ -185,6 +188,42 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return list(by_title.values()) + no_title
 
 
+def _semantic_dedupe(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if len(items) < 2:
+        return items
+    titles = [item["title"] for item in items]
+    prompt = (
+        "You are given a list of article titles (some in English, some in Chinese). "
+        "Group titles that cover the same news event into clusters. "
+        "Return ONLY a JSON array of arrays, where each inner array contains the "
+        f"0-based indices of titles in the same group. "
+        f"Every index 0..{len(items) - 1} must appear in exactly one group.\n\n"
+        f"Titles:\n{json.dumps(titles, ensure_ascii=False)}"
+    )
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        groups: List[List[int]] = json.loads(response.content[0].text)
+    except Exception as e:
+        logger.warning(f"Semantic dedupe LLM call failed, skipping: {e}")
+        return items
+
+    result: List[Dict[str, Any]] = []
+    for group in groups:
+        if not group:
+            continue
+        winner = items[group[0]]
+        for idx in group[1:]:
+            if idx < len(items):
+                winner = _better_item(winner, items[idx])
+        result.append(winner)
+    return result
+
+
 class RssFetcher(BaseFetcher):
     def __init__(self) -> None:
         # Populated during fetch(). Each source maps to a dict of stage → count:
@@ -251,6 +290,10 @@ class RssFetcher(BaseFetcher):
         before_dedupe = len(all_items)
         all_items = _dedupe_items(all_items)
         logger.info(f"Dedupe: {before_dedupe} -> {len(all_items)} items")
+
+        before_semantic = len(all_items)
+        all_items = _semantic_dedupe(all_items)
+        logger.info(f"Semantic dedupe: {before_semantic} -> {len(all_items)} items")
 
         for s in stage_counts:
             stage_counts[s]["relevant"] = 0
