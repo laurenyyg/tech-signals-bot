@@ -13,7 +13,7 @@
 ## Data Pipeline
 
 ### What Profile
-- **Sources**: Techmeme, CoinDesk, and TechCrunch via RSS (`feedparser`).
+- **Sources**: Techmeme, CoinDesk, TechCrunch, and OpenAI News via RSS (`feedparser`); Anthropic news and research via Sanity CMS API (public JSON endpoint, no RSS).
 - **Cross-feed dedupe**: After the 7-day window, merge duplicates in `rss_fetcher.py`: first by normalized URL (strip `utm_*`, `fbclid`, `gclid`, etc.), then by normalized title (strip `| TechCrunch` / `- CoinDesk` style suffixes). On conflict: higher keyword score wins; tie-break newer `published`; if still tied, keep the first-seen row in dedupe order (roughly `FEEDS` order for URL pass).
 - **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts unique surviving rows per feed (not raw RSS rows).
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.

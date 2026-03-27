@@ -9,7 +9,7 @@ A personal intelligence bot that scrapes curated tech and crypto sources, analys
 ### `--profile what`
 **What happened in tech this week?**
 
-Scrapes Techmeme, CoinDesk, and TechCrunch via RSS, scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL, then normalized title), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
+Scrapes Techmeme, CoinDesk, TechCrunch, and OpenAI News via RSS, plus Anthropic news and research via their public Sanity CMS API. Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL, then normalized title), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications.
 
 **Schedule:** Sundays at 8:47 PM Vancouver time.
 
@@ -21,6 +21,7 @@ Scrapes long-form essays and presentations from:
 - **DeepLearning.AI** (Andrew Ng) — Letters from Andrew Ng
 - **Ben-Evans** (Benedict Evans) — Essays and bi-annual presentations
 - **a16z** — Newsletter essays via Substack (investment announcements excluded)
+- **One Useful Thing** (Ethan Mollick) — Public RSS feed
 
 Filters to the last 7 days, flags deep reads against a keyword list, and asks Claude to summarise each piece as bullet points with core thesis and second-order implications.
 
@@ -82,16 +83,16 @@ Both pipelines run automatically via GitHub Actions. Add the following secrets t
 main.py                  Entry point, argument routing, Anthropic call, Slack post
 ├── fetchers/
 │   ├── base_fetcher.py  Abstract base class
-│   ├── rss_fetcher.py   What profile — RSS + keyword scoring + cross-feed dedupe
-│   └── why_fetcher.py   Why profile — Stratechery RSS, DL.AI + Ben-Evans HTML scrapers, a16z Substack API
+│   ├── rss_fetcher.py   What profile — RSS feeds + Anthropic Sanity CMS API, keyword scoring, cross-feed dedupe
+│   └── why_fetcher.py   Why profile — Stratechery RSS, DL.AI + Ben-Evans HTML scrapers, a16z Substack API, One Useful Thing RSS
 ├── prompts.py           System prompts for each profile
 ├── models.py            Dataclasses (NewsSignal, WhySignal)
-└── config.py            DEEP_READ_KEYWORDS
+└── config.py            DEEP_READ_KEYWORDS, SUMMARY_TRUNCATE_CHARS
 ```
 
 ### Pre-LLM pipeline (Why profile)
 
-1. Scrape all 4 sources concurrently → raw item dicts
+1. Scrape all 5 sources → raw item dicts
 2. Drop items outside the 7-day window
 3. Flag `needs_deep_read` via keyword scan
 4. Serialise to numbered plaintext → user message
