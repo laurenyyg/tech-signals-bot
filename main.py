@@ -21,8 +21,8 @@ import trafilatura
 from dotenv import load_dotenv
 
 from config import SUMMARY_TRUNCATE_CHARS
-from fetchers.rss_fetcher import DAYS_FILTER, RssFetcher
-from fetchers.why_fetcher import WhyFetcher
+from fetchers.rss_fetcher import DAYS_FILTER as WHAT_DAYS_FILTER, RssFetcher
+from fetchers.why_fetcher import DAYS_FILTER as WHY_DAYS_FILTER, WhyFetcher
 from models import NewsSignal
 from prompts import HOW_PROFILE_PROMPT, WHAT_PROFILE_PROMPT, WHY_PROFILE_PROMPT
 from sheets_writer import append_what_run, compute_relevant_per_source
@@ -228,9 +228,9 @@ def call_anthropic(
     return signals, usage_meta
 
 
-def _date_range_str() -> str:
+def _date_range_str(days: int) -> str:
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=DAYS_FILTER)
+    start = now - timedelta(days=days)
     fmt = lambda d: f"{d.strftime('%b')} {d.day}"
     return f"{fmt(start)} – {fmt(now)}"
 
@@ -275,7 +275,7 @@ def build_slack_payload(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Tech Signals Digest — {len(signals)} signal(s) | {_date_range_str()}",
+                "text": f"Tech Signals Digest — {len(signals)} signal(s) | {_date_range_str(WHAT_DAYS_FILTER)}",
                 "emoji": True,
             },
         },
@@ -311,7 +311,7 @@ def build_slack_payload(
             funnel_lines.append(
                 f"📡 *{source.capitalize()}*   "
                 f"{counts.get('fetched', 0)} fetched  ›  "
-                f"{counts.get('in_window', 0)} in last 7d  ›  "
+                f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
                 f"{counts.get('relevant', 0)} relevant  ›  "
                 f"{counts.get('sent_to_llm', 0)} sent to LLM"
             )
@@ -353,7 +353,7 @@ def build_why_slack_payload(
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "_No essays or presentations published in the last 7 days._",
+                        "text": f"_No essays or presentations published in the last {WHY_DAYS_FILTER} days._",
                     },
                 },
                 {
@@ -368,7 +368,7 @@ def build_why_slack_payload(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Why Signals Digest — {len(signals)} item(s) | {_date_range_str()}",
+                "text": f"Why Signals Digest — {len(signals)} item(s) | {_date_range_str(WHY_DAYS_FILTER)}",
                 "emoji": True,
             },
         },
