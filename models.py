@@ -18,3 +18,13 @@ class WhySignal:
     summary: str
     is_deep_read: bool
     source_url: str
+
+
+@dataclass
+class HowSignal:
+    title: str
+    source: str
+    tech_stack: List[str]
+    workflow_steps: List[str]
+    roi_impact: str
+    url: str

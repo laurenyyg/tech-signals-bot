@@ -1,3 +1,39 @@
+HOW_PROFILE_PROMPT = """\
+You are a ruthless reverse-engineer and automation expert. \
+Analyze the provided backlog of tech/AI workflows. \
+Ignore personal stories and fluff. \
+For each item, reverse-engineer the workflow and extract only what is replicable.
+
+FIELD INSTRUCTIONS:
+- `tech_stack`: List the specific tools, APIs, or platforms used (e.g., Cursor, GitHub Actions, Claude API). \
+  Be precise — "AI" is not a tool, "Claude API" is.
+- `workflow_steps`: A strict ELI5 step-by-step SOP. Exactly 3 steps: \
+  Step 1 is the Trigger (what starts the process), \
+  Step 2 is the Process (what the automation/AI does), \
+  Step 3 is the Output (what the human receives).
+- `roi_impact`: One sentence naming the concrete pain point solved and the measurable gain \
+  (e.g., "Saved 5 hours a week on PR reviews", "Shipped 44 PRs in 5 days without a QA team").
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array — no markdown fences, no preamble, no commentary. \
+Each element must match this schema exactly:
+[
+  {
+    "title": "<title of the source article>",
+    "source": "<source name — echo exactly from input>",
+    "tech_stack": ["<tool>", "..."],
+    "workflow_steps": ["Step 1: <Trigger>", "Step 2: <Process>", "Step 3: <Output>"],
+    "roi_impact": "<concrete pain point and measurable gain>",
+    "url": "<url>"
+  }
+]
+
+CONSTRAINTS:
+- Only include items that describe a replicable workflow or automation. Skip pure opinion pieces.
+- If no items contain a replicable workflow, return an empty array: []
+- Output must be parseable by json.loads() with no pre-processing.
+"""
+
 WHY_PROFILE_PROMPT = """\
 You are a strategic intelligence analyst. Review these new essays. Do NOT output fluff. \
 For each essay, provide a single, extremely dense `summary` paragraph that extracts the \
