@@ -1,0 +1,38 @@
+name: How Pipeline - Weekly Synthesizer
+
+on:
+  schedule:
+    - cron: "27 16 * * 6"  # Saturdays at 9:27 AM PDT
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-synthesizer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run How synthesizer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HOW_WEBHOOK_URL: ${{ secrets.HOW_WEBHOOK_URL }}
+        run: python main.py --profile how
+
+      - name: Commit and push state reset
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/how_backlog.json
+          git commit -m "chore: reset how_backlog.json after successful slack delivery [skip ci]" || echo "No changes to commit"
+          git push
