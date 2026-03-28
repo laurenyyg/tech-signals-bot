@@ -13,7 +13,7 @@ from fetchers.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
-DAYS_FILTER = 7
+DAYS_FILTER = 8
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -251,6 +251,7 @@ class WhyFetcher(BaseFetcher):
         except Exception as e:
             logger.error(f"Error scraping deeplearning-ai ({DEEPLEARNING_AI_URL}): {e}")
 
+        logger.info(f"deeplearning-ai: {len(items)} letter(s) in window")
         return items
 
     def _scrape_ben_evans(
