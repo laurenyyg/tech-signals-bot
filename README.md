@@ -65,7 +65,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 **Pre-LLM pipeline**:
 1. Fetch all sources → raw items
-2. Drop items outside a 7-day rolling window
+2. Drop items outside a 7-day rolling window. DeepLearning.AI date-only timestamps (no time component) are given a +1 day buffer so articles published on the exact cutoff day aren't inadvertently dropped.
 3. Stratechery deduplication: articles win over podcasts on same title
 4. Claude determines `is_deep_read` from content
 

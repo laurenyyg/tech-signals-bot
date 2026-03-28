@@ -219,6 +219,10 @@ class WhyFetcher(BaseFetcher):
                                 published = published.replace(tzinfo=timezone.utc)
                             else:
                                 published = published.astimezone(timezone.utc)
+                            # Date-only values (no time component) parse as midnight;
+                            # add 1 day so articles published on the cutoff day aren't dropped.
+                            if published.hour == 0 and published.minute == 0 and published.second == 0:
+                                published = published + timedelta(days=1)
                         except ValueError:
                             pass
 
