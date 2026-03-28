@@ -1,37 +1,199 @@
 # Tech Signals Bot
 
-A personal intelligence bot that scrapes curated tech and crypto sources, analyses them with Claude, and posts dense signal digests to Slack.
+A personal intelligence system that scrapes curated tech, crypto, and AI sources, analyses them with Claude, and posts dense signal digests to Slack. Three pipelines answer three distinct questions: **What** happened, **Why** it matters, and **How** people are actually using AI tools.
 
 ---
 
-## Profiles
+## Architecture
 
-### `--profile what`
-**What happened in tech this week?**
+```
+┌─────────────────────────────────────────────────────────┐
+│                    WHAT  (weekly)                        │
+│  RSS feeds + Anthropic scrape                           │
+│  → keyword scoring → 3-pass dedup → top 40             │
+│  → Sonnet: cluster paradigm-shifting signals → Slack    │
+└─────────────────────────────────────────────────────────┘
 
-Scrapes Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS, plus Anthropic news and research by scraping their SSR page HTML (the Sanity CMS public API is no longer accessible without auth). Scores items against a crypto/AI/infrastructure keyword whitelist, **deduplicates** overlapping stories across feeds (normalized URL → normalized title → semantic dedup via Claude Haiku for cross-language duplicates), keeps the top 40, and asks Claude to extract paradigm-shifting signals. Posts a structured digest with macro event, ELI5 explanation, and second-order investment implications. After each run, per-source performance stats (articles in window, LLM-relevant count, ratio) are appended to a Google Spreadsheet.
+┌─────────────────────────────────────────────────────────┐
+│                    WHY  (weekly)                         │
+│  Stratechery / DL.AI / Ben-Evans / a16z / One Useful    │
+│  → 7-day window → deep-read flag                        │
+│  → Sonnet: dense bullet summaries → Slack               │
+└─────────────────────────────────────────────────────────┘
 
-**Schedule:** Sundays at 8:47 PM Vancouver time.
+┌─────────────────────────────────────────────────────────┐
+│                    HOW  (decoupled)                      │
+│                                                          │
+│  Daily Catcher (catch_how.py)                           │
+│    ChatPRD + SSPAI → deduplicate → data/how_backlog.json│
+│                         │                               │
+│  Weekly Synthesizer (main.py --profile how)             │
+│    Haiku bouncer: filter non-workflow articles           │
+│    → Sonnet formatter: structure into HowSignal JSON    │
+│    → Slack → clear backlog                              │
+└─────────────────────────────────────────────────────────┘
+```
 
-### `--profile why`
-**Why does it matter?**
+---
 
-Scrapes long-form essays and presentations from:
-- **Stratechery** (Ben Thompson) — private subscriber RSS feed (articles + podcast with transcripts, deduplicated by title)
-- **DeepLearning.AI** (Andrew Ng) — Letters from Andrew Ng
-- **Ben-Evans** (Benedict Evans) — Essays and bi-annual presentations
-- **a16z** — Newsletter essays via Substack (investment announcements excluded)
-- **One Useful Thing** (Ethan Mollick) — Public RSS feed
+## The Three Pipelines
 
-Filters to the last 7 days, flags deep reads against a keyword list, and asks Claude to summarise each piece as bullet points with core thesis and second-order implications.
+### `--profile what` — What happened in tech?
 
-**Schedule:** Fridays at 4:37 PM Vancouver time.
+**Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News, 机器之心 (Jiqizhixin) via RSS; Anthropic news and research via SSR HTML scraping.
+
+**Pre-LLM pipeline**:
+1. Fetch all feeds → raw items
+2. Three-pass cross-feed deduplication:
+   - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
+   - Pass 2: Normalised title (strips ` | TechCrunch`, ` - CoinDesk`-style suffixes)
+   - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — catches cross-language duplicates (e.g. a 机器之心 article covering the same event as an English source)
+3. Keyword score against `KEYWORD_WHITELIST`. Drop zero-score items.
+4. Keep top 40 by score.
+
+**LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications.
+
+**Post-run**: Per-source performance stats (fetched, in-window, relevant, sent-to-LLM) are appended to a Google Spreadsheet.
+
+**Schedule**: Sundays at 8:47 PM Vancouver time.
+
+---
+
+### `--profile why` — Why does it matter?
+
+**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (articles + podcast transcripts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (investment announcements excluded), One Useful Thing (Ethan Mollick).
+
+**Pre-LLM pipeline**:
+1. Fetch all sources → raw items
+2. Drop items outside a 7-day rolling window
+3. Stratechery deduplication: articles win over podcasts on same title
+4. Claude determines `is_deep_read` from content
+
+**LLM call**: Title, author, content type, full summary (truncated to 1500 chars), and URL included. 1-to-1 mapping — no clustering.
+
+**Slack format**:
+
+| Prefix | Meaning |
+|---|---|
+| ❗️ | Deep read (LLM-flagged) |
+| 🧠 | Standard essay |
+| 🗂 | Presentation |
+| 🎙 | Podcast |
+
+**Schedule**: Fridays at 4:37 PM Vancouver time.
+
+---
+
+### `--profile how` — How are people using AI tools?
+
+A decoupled two-stage pipeline designed around the **Daily Catcher / Weekly Synthesizer** pattern (see below).
+
+**Sources**: ChatPRD "How I AI" page (JSON-LD scraping), SSPAI (RSS, filtered by author whitelist and keyword scoring).
+
+**Schedule**: Catcher runs daily at 11:03 UTC. Synthesizer runs Saturdays at 9:27 AM PDT.
+
+---
+
+## FinOps & Cascade Pattern (How Pipeline)
+
+The How pipeline uses a two-model cascade to minimise Sonnet token spend. Most articles in the backlog are lifestyle/opinion pieces that contain no replicable workflow — running them through Sonnet directly would be wasteful.
+
+```
+Backlog item
+    │
+    ▼
+preprocess_article()          ← trafilatura strips HTML boilerplate
+    │
+    ▼
+Stage 1 — Haiku Bouncer       ← claude-3-5-haiku-20241022, max 1024 tokens
+  "Does this article contain
+   an explicit step-by-step
+   AI workflow SOP? If not,
+   return NULL."
+    │
+    ├─ NULL ──► discard, log "[Cascade] Article X contains no structured workflow"
+    │
+    └─ workflow text ──►
+          │
+          ▼
+        Log: "[FinOps] Sonnet input size: N words. Cost significantly reduced!"
+          │
+          ▼
+Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens
+  Structures pre-filtered text
+  into HowSignal JSON:
+    tech_stack, workflow_steps,
+    roi_impact
+          │
+          ▼
+       Slack post
+```
+
+**Every Slack message includes a FinOps footer** showing aggregate token usage across all Haiku + Sonnet calls in that run:
+
+```
+_Model: claude-sonnet-4-6 | Tokens: 4821/16000 | Budget: OK_
+```
+
+The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. In a typical backlog of 20–40 articles, the majority are discarded at Stage 1.
+
+---
+
+## Decoupled Data Engineering (How Pipeline)
+
+The How pipeline separates **data collection** from **data processing** to avoid two failure modes:
+
+**Problem 1 — Data decay**: AI workflow articles are time-sensitive. A weekly fetch-and-synthesise approach would miss articles that fall outside a narrow scraping window on synthesis day.
+
+**Problem 2 — LLM cost on empty runs**: Running the Sonnet formatter daily when most days have zero new workflow articles wastes money.
+
+**Solution — Daily Catcher / Weekly Synthesizer**:
+
+| Component | File | Runs | Does |
+|---|---|---|---|
+| Daily Catcher | `catch_how.py` | Daily (GitHub Actions) | Fetches ChatPRD + SSPAI, deduplicates by URL, appends to `data/how_backlog.json`, commits to repo. No LLM calls. |
+| Weekly Synthesizer | `main.py --profile how` | Saturdays | Reads the accumulated backlog, runs the Haiku→Sonnet cascade, posts to Slack, and **only if the Slack post succeeds**, overwrites the backlog with `[]`. |
+
+The backlog is a plain JSON file committed to the repo by the catcher workflow. If the synthesizer fails (API error, Slack outage), the backlog is left untouched — all articles are retried next Saturday. No data is lost.
+
+---
+
+## File Structure
+
+```
+main.py                   Entry point — --profile what|why|how
+catch_how.py              How daily catcher (no LLM)
+config.py                 Shared constants (keywords, author lists, truncation)
+models.py                 Dataclasses: NewsSignal, WhySignal, HowSignal
+prompts.py                LLM system prompts for all three profiles
+sheets_writer.py          What profile — Google Sheets source tracking
+
+fetchers/
+  base_fetcher.py         Abstract base class
+  rss_fetcher.py          What sources + 3-pass dedup + keyword scoring
+  why_fetcher.py          Why sources — Stratechery, DL.AI, Ben-Evans, a16z, OUT
+  chatprd_fetcher.py      How source — ChatPRD JSON-LD scraper
+  sspai_fetcher.py        How source — SSPAI RSS with author/keyword filter
+
+data/
+  how_backlog.json        Persistent How backlog (committed by catcher CI)
+
+.github/workflows/
+  what_pipeline.yml       Weekly What pipeline
+  why_pipeline.yml        Weekly Why pipeline
+  how_catcher.yml         Daily How catcher + backlog commit
+  how_synthesizer.yml     Weekly How synthesizer + backlog reset
+
+tests/
+  test_rss_fetcher.py     Unit tests (mocked XML, no live HTTP)
+```
 
 ---
 
 ## Setup
 
-**1. Clone and create a virtual environment**
+### 1. Clone and install
+
 ```bash
 git clone https://github.com/laurengyu/ly-tech-signals-bot.git
 cd ly-tech-signals-bot
@@ -39,79 +201,59 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-**2. Configure environment variables**
+### 2. Configure `.env`
 
 Create a `.env` file in the project root:
-```
-ANTHROPIC_API_KEY=your_key_here
-WHAT_WEBHOOK_URL=your_slack_webhook_here
-WHY_WEBHOOK_URL=your_slack_webhook_here
-STRATECHERY_RSS_URL=your_private_article_rss_url_here
-STRATECHERY_PODCAST_URL=your_private_podcast_rss_url_here
-DATAIMPULSE_PROXY_URL=http://username:password@gw.dataimpulse.com:823
-GOOGLE_SPREADSHEET_ID=your_spreadsheet_id_here
+
+```env
+# Required — all profiles
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Required — Slack webhooks per profile
+WHAT_WEBHOOK_URL=https://hooks.slack.com/...
+WHY_WEBHOOK_URL=https://hooks.slack.com/...
+HOW_WEBHOOK_URL=https://hooks.slack.com/...
+
+# Required — Why profile (private Stratechery subscriber URLs)
+STRATECHERY_RSS_URL=https://stratechery.com/feed/...
+STRATECHERY_PODCAST_URL=https://stratechery.com/feed/...
+
+# Required — What profile (Google Sheets source tracking)
+GOOGLE_SPREADSHEET_ID=1abc...
 GOOGLE_SERVICE_ACCOUNT_PATH=information-source-digest-0a187c6dd85d.json
+
+# Optional — residential proxy (falls back to direct if unset)
+DATAIMPULSE_PROXY_URL=http://username:password@gw.dataimpulse.com:823
 ```
 
-`STRATECHERY_RSS_URL` and `STRATECHERY_PODCAST_URL` are private subscriber URLs from Stratechery (both required for the Why profile). Find them in your Stratechery account settings.
-`DATAIMPULSE_PROXY_URL` is optional. If omitted, all requests fall back to a direct connection.
-`GOOGLE_SPREADSHEET_ID` and `GOOGLE_SERVICE_ACCOUNT_PATH` are required for the What profile's performance tracking. Place the Google Cloud service account JSON in the project root and add it to `.gitignore`.
+Place the Google Cloud service account JSON file in the project root and add it to `.gitignore`.
 
-**3. Run locally**
+### 3. Run locally
+
 ```bash
 venv/bin/python main.py --profile what
 venv/bin/python main.py --profile why
+venv/bin/python main.py --profile how
+
+# Run the How catcher manually (no LLM, just fetch + append to backlog)
+venv/bin/python catch_how.py
 ```
 
----
+### 4. GitHub Secrets
 
-## GitHub Actions
+Add the following secrets to your repository under `Settings → Secrets and variables → Actions`:
 
-Both pipelines run automatically via GitHub Actions. Add the following secrets to your repository (`Settings → Secrets → Actions`):
-
-| Secret | Description |
-|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `WHAT_WEBHOOK_URL` | Slack webhook for the What digest |
-| `WHY_WEBHOOK_URL` | Slack webhook for the Why digest |
-| `STRATECHERY_RSS_URL` | Private Stratechery article RSS URL |
-| `STRATECHERY_PODCAST_URL` | Private Stratechery podcast RSS URL |
-| `DATAIMPULSE_PROXY_URL` | Residential proxy URL (optional) |
-| `GOOGLE_SPREADSHEET_ID` | Spreadsheet ID for What profile performance tracking |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full contents of the Google Cloud service account JSON file |
-
----
-
-## Architecture
-
-```
-main.py                  Entry point, argument routing, Anthropic call, Slack post
-├── fetchers/
-│   ├── base_fetcher.py  Abstract base class
-│   ├── rss_fetcher.py   What profile — RSS feeds + Anthropic SSR scraper, keyword scoring, cross-feed dedupe
-│   └── why_fetcher.py   Why profile — Stratechery RSS, DL.AI + Ben-Evans HTML scrapers, a16z Substack API, One Useful Thing RSS
-├── sheets_writer.py     What profile — appends per-source performance stats to Google Sheets after each run
-├── prompts.py           System prompts for each profile
-├── models.py            Dataclasses (NewsSignal, WhySignal)
-└── config.py            DEEP_READ_KEYWORDS, SUMMARY_TRUNCATE_CHARS
-```
-
-### Pre-LLM pipeline (Why profile)
-
-1. Scrape all 5 sources → raw item dicts
-2. Drop items outside the 7-day window
-3. Flag `needs_deep_read` via keyword scan
-4. Serialise to numbered plaintext → user message
-5. Send to Claude with `WHY_PROFILE_PROMPT`
-
-### Slack format (Why profile)
-
-| Prefix | Meaning |
-|---|---|
-| ❗️ | Deep read flagged |
-| 🧠 | Standard essay |
-| 🗂 | Presentation |
-| 🎙 | Podcast episode |
+| Secret | Required for | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | All | Anthropic API key |
+| `WHAT_WEBHOOK_URL` | What | Slack incoming webhook |
+| `WHY_WEBHOOK_URL` | Why | Slack incoming webhook |
+| `HOW_WEBHOOK_URL` | How | Slack incoming webhook |
+| `STRATECHERY_RSS_URL` | Why | Private Stratechery article RSS URL |
+| `STRATECHERY_PODCAST_URL` | Why | Private Stratechery podcast RSS URL |
+| `GOOGLE_SPREADSHEET_ID` | What | Spreadsheet ID for source performance tracking |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | What | Full contents of the Google Cloud service account JSON |
+| `DATAIMPULSE_PROXY_URL` | Optional | Residential proxy URL |
 
 ---
 
@@ -120,3 +262,5 @@ main.py                  Entry point, argument routing, Anthropic call, Slack po
 ```bash
 venv/bin/python -m pytest tests/
 ```
+
+Tests use local mocked XML — no live HTTP requests.
