@@ -20,6 +20,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Debug proxy URL length
+        env:
+          DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
+        run: echo "Proxy URL length = ${#DATAIMPULSE_PROXY_URL}"
+
       - name: Run Why pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
