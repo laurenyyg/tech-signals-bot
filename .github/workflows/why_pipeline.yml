@@ -35,6 +35,15 @@ jobs:
           print(f"password present={bool(p.password)}, len={len(p.password or '')}")
           print(f"hostname={p.hostname!r}")
           print(f"port={p.port!r}")
+
+          import requests
+          proxies = {"http": url, "https": url}
+          for label, test_url in [("HTTP", "http://httpbin.org/ip"), ("HTTPS", "https://httpbin.org/ip")]:
+              try:
+                  r = requests.get(test_url, proxies=proxies, timeout=10)
+                  print(f"{label} proxy test: {r.status_code} — {r.text[:80]}")
+              except Exception as e:
+                  print(f"{label} proxy test FAILED: {e}")
           EOF
 
       - name: Run Why pipeline
