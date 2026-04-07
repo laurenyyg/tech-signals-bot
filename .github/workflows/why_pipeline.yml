@@ -44,6 +44,18 @@ jobs:
                   print(f"{label} proxy test: {r.status_code} — {r.text[:80]}")
               except Exception as e:
                   print(f"{label} proxy test FAILED: {e}")
+
+          import subprocess
+          user = unquote(p.username or "")
+          pwd = unquote(p.password or "")
+          host = f"{p.hostname}:{p.port}"
+          result = subprocess.run(
+              ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+               "--proxy-user", f"{user}:{pwd}", "--proxy", host,
+               "http://httpbin.org/ip"],
+              capture_output=True, text=True
+          )
+          print(f"curl HTTP test status: {result.stdout.strip()}")
           EOF
 
       - name: Run Why pipeline
