@@ -20,10 +20,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Debug proxy URL length
+      - name: Debug proxy URL
         env:
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
-        run: echo "Proxy URL length = ${#DATAIMPULSE_PROXY_URL}"
+        run: |
+          echo "Proxy URL length = ${#DATAIMPULSE_PROXY_URL}"
+          python - <<'EOF'
+          import os
+          from urllib.parse import urlparse, unquote
+          url = os.getenv("DATAIMPULSE_PROXY_URL", "")
+          p = urlparse(url)
+          print(f"scheme={p.scheme!r}")
+          print(f"username present={bool(p.username)}, len={len(p.username or '')}")
+          print(f"password present={bool(p.password)}, len={len(p.password or '')}")
+          print(f"hostname={p.hostname!r}")
+          print(f"port={p.port!r}")
+          EOF
 
       - name: Run Why pipeline
         env:
