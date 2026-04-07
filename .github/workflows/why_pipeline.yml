@@ -20,44 +20,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Debug proxy URL
-        env:
-          DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
-        run: |
-          echo "Proxy URL length = ${#DATAIMPULSE_PROXY_URL}"
-          python - <<'EOF'
-          import os
-          from urllib.parse import urlparse, unquote
-          url = os.getenv("DATAIMPULSE_PROXY_URL", "")
-          p = urlparse(url)
-          print(f"scheme={p.scheme!r}")
-          print(f"username present={bool(p.username)}, len={len(p.username or '')}")
-          print(f"password present={bool(p.password)}, len={len(p.password or '')}")
-          print(f"hostname={p.hostname!r}")
-          print(f"port={p.port!r}")
-
-          import requests
-          proxies = {"http": url, "https": url}
-          for label, test_url in [("HTTP", "http://httpbin.org/ip"), ("HTTPS", "https://httpbin.org/ip")]:
-              try:
-                  r = requests.get(test_url, proxies=proxies, timeout=10)
-                  print(f"{label} proxy test: {r.status_code} — {r.text[:80]}")
-              except Exception as e:
-                  print(f"{label} proxy test FAILED: {e}")
-
-          import subprocess
-          user = unquote(p.username or "")
-          pwd = unquote(p.password or "")
-          host = f"{p.hostname}:{p.port}"
-          result = subprocess.run(
-              ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-               "--proxy-user", f"{user}:{pwd}", "--proxy", host,
-               "http://httpbin.org/ip"],
-              capture_output=True, text=True
-          )
-          print(f"curl HTTP test status: {result.stdout.strip()}")
-          EOF
-
       - name: Run Why pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
