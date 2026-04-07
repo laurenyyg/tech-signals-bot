@@ -290,6 +290,8 @@ class RssFetcher(BaseFetcher):
                     agent=USER_AGENT,
                     handlers=[self._proxy_handler] if self._proxy_handler else [],
                 )
+                if feed.bozo and not feed.entries:
+                    logger.error(f"Error fetching feed '{source}': {feed.bozo_exception}")
                 stage_counts[source]["fetched"] = len(feed.entries)
                 logger.info(f"Fetched {len(feed.entries)} raw entries from {source}")
 
