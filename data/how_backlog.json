@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "title": "AI 输出中的 ** 是怎么来的：谈中文 Markdown 强调标记的渲染问题",
+    "link": "https://sspai.com/post/108768",
+    "summary": "在与AI对话的过程中，你一定见过这样不伦不类的输出：换言之，那些本该加粗的部分并没有加粗，周围却多了一堆星号。有一定技术背景的读者都知道，这些星号是Markdown中的强调标记。Markdown是一种 ...<a href=\"https://sspai.com/post/108768\" target=\"_blank\">查看全文</a>",
+    "author": "PlatyHsu",
+    "published": "2026-04-19T06:10:43+00:00",
+    "source": "SSPAI"
+  }
+]
