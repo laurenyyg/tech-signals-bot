@@ -28,5 +28,12 @@
     "author": "Lars漫步",
     "published": "2026-06-02T03:00:00+00:00",
     "source": "SSPAI"
+  },
+  {
+    "title": "How I Built an AI Avatar and Hype Video in 15 Minutes with Google Flow",
+    "link": "https://www.chatprd.ai/how-i-ai/ai-avatar-video-in-15-minutes-with-google-omni-flow",
+    "summary": "I put Google Flow and the new Gemini Omni model to the test by creating an AI avatar of myself and producing a full podcast hype video from scratch. Here’s the entire workflow, from scanning my face to the final, slightly uncanny result.",
+    "published": "2026-06-03T00:11:29.932000+00:00",
+    "source": "ChatPRD"
   }
 ]
