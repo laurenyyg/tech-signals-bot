@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "title": "How Mozilla Fixed 500 Security Bugs with Claude Mythos",
+    "link": "https://www.chatprd.ai/how-i-ai/how-mozilla-fixed-500-security-bugs-with-mythos",
+    "summary": "Mozilla's Brian Grinstead reveals the custom AI agent workflows they built to find and patch hundreds of security bugs in Firefox, a process you can adapt for your own projects.",
+    "published": "2026-06-21T15:07:24.068000+00:00",
+    "source": "ChatPRD"
+  },
+  {
+    "title": "派早报：英特尔将为苹果代工芯片",
+    "link": "https://sspai.com/post/111343",
+    "summary": "<p>英特尔将为苹果代工芯片</p><p>库克称 iPhone 涨价不可避免</p><p>美国科技公司政策转向，限制员工 AI 成本</p><p>Modos 推出开源 13.3 寸彩色墨水屏</p><p>Manus 原投资人计划将其原价购回</p><p>CMF 已取消今年发布计划</p><p>看看就行的简讯</p><p>少数派的近期动态</p><p>你可能错过的好文章</p><a href=\"https://sspai.com/post/111343\" target=\"_blank\">查看全文</a>",
+    "author": "少数派编辑部",
+    "published": "2026-06-21T23:13:32+00:00",
+    "source": "SSPAI"
+  },
+  {
+    "title": "AI 工作流实践：100% Vibe Coding 完成 Game Jam 游戏开发",
+    "link": "https://sspai.com/post/110972",
+    "summary": "Agent 和人一样离不开闭环。<a href=\"https://sspai.com/post/110972\" target=\"_blank\">查看全文</a>",
+    "author": "Blasin",
+    "published": "2026-06-21T02:30:10+00:00",
+    "source": "SSPAI"
+  }
+]
