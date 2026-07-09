@@ -13,5 +13,20 @@
     "author": "少数派编辑部",
     "published": "2026-07-05T23:40:25+00:00",
     "source": "SSPAI"
+  },
+  {
+    "title": "How I Built a Custom AI Harness with the Claude Agent SDK for Bug Triage",
+    "link": "https://www.chatprd.ai/how-i-ai/how-i-built-a-custom-ai-harness",
+    "summary": "I demystify the term 'AI harness' and show you my exact workflow for building one to automate Sentry bug triage using the Claude Agent SDK, a custom terminal UI, and opinionated tool adapters.",
+    "published": "2026-07-08T15:57:45.221000+00:00",
+    "source": "ChatPRD"
+  },
+  {
+    "title": "派早报：GPT-5.6 即将开放使用、Nothing 发布 Phone (4b) 等",
+    "link": "https://sspai.com/post/112091",
+    "summary": "Notion 推出全新应用 Agents、Jolla Phone (2026) 手机正式发售等。<a href=\"https://sspai.com/post/112091\" target=\"_blank\">查看全文</a>",
+    "author": "少数派编辑部",
+    "published": "2026-07-09T00:40:02+00:00",
+    "source": "SSPAI"
   }
 ]
