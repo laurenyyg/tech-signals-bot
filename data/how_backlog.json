@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "title": "基于 Termux 的 Android 手机开发服务器实操",
+    "link": "https://sspai.com/prime/story/dev-env-on-android-with-termux",
+    "summary": "不 root、不刷机，在随身设备上跑通 AI Agent 与微型 Linux 环境。<a href=\"https://sspai.com/prime/story/dev-env-on-android-with-termux\" target=\"_blank\">查看全文</a><p>本文为会员文章，出自<a href=\"https://sspai.com/prime/precog/single\" target=\"_blank\">《单篇文章》</a>，订阅后可阅读全文。</p>",
+    "author": "neyham",
+    "published": "2026-09-28T09:33:03+00:00",
+    "source": "SSPAI"
+  },
+  {
+    "title": "派早报：OpenAI 称与苹果合作效果不佳",
+    "link": "https://sspai.com/post/115079",
+    "summary": "<p>OpenAI 称与苹果合作效果不佳</p><p>iPhone 4「天线门」媒体问答录像时隔十六年现身</p><p>F-Droid 2.0 发布</p><p>三星冰箱固件升级后罢工，影响韩国用户过中秋</p><p>Excel 单元格将支持数组</p><p>微软不再使用 Copilot+ PC 品牌</p><p>看看就行的简讯</p><p>少数派的近期动态</p><p>你可能错过的好文章</p><a href=\"https://sspai.com/post/115079\" target=\"_blank\">查看全文</a>",
+    "author": "少数派编辑部",
+    "published": "2026-09-27T23:03:45+00:00",
+    "source": "SSPAI"
+  }
+]
