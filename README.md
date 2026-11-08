@@ -1,6 +1,6 @@
 # Tech Signals Bot
 
-A personal intelligence system that scrapes curated tech, crypto, and AI sources, analyses them with Claude, and posts dense signal digests to Slack. Three pipelines answer three distinct questions: **What** happened, **Why** it matters, and **How** people are actually using AI tools.
+A personal intelligence system that scrapes curated tech and AI sources, analyses them with Claude, and posts dense signal digests to Slack. Three pipelines answer three distinct questions: **What** happened, **Why** it matters, and **How** people are actually using AI tools.
 
 ---
 
@@ -47,7 +47,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 1. Fetch all feeds → raw items
 2. Three-pass cross-feed deduplication:
    - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
-   - Pass 2: Normalised title (strips ` | TechCrunch`, ` - CoinDesk`-style suffixes)
+   - Pass 2: Normalised title (strips ` | TechCrunch`, ` - Techmeme`-style suffixes)
    - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement)
 3. Keyword score against `KEYWORD_WHITELIST`. Drop zero-score items.
 4. Keep top 40 by score.
