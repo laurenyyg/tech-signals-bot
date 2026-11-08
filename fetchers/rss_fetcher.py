@@ -21,7 +21,6 @@ FEEDS: Dict[str, str] = {
     "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
     "techcrunch": "https://techcrunch.com/feed/",
     "openai_news": "https://openai.com/news/rss.xml",
-    "jiqizhixin": "https://wechat2rss.xlab.app/feed/51e92aad2728acdd1fda7314be32b16639353001.xml",
 }
 
 ANTHROPIC_PAGES: Dict[str, str] = {
@@ -232,7 +231,7 @@ def _semantic_dedupe(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return items
     titles = [item["title"] for item in items]
     prompt = (
-        "You are given a list of article titles (some in English, some in Chinese). "
+        "You are given a list of article titles. "
         "Group titles that cover the same news event into clusters. "
         "Return ONLY a JSON array of arrays, where each inner array contains the "
         f"0-based indices of titles in the same group. "
