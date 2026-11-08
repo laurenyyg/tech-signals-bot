@@ -2,7 +2,7 @@
 
 Session tracker for the Why pipeline rewrite. Update as items land.
 
-**Status:** Phases 1–3 committed on branch `why-rewrite` (latest code: 8e1f377) and verified by a live run. Not merged to `main`. Tests: 102 passing.
+**Status:** Phases 1–3 committed on branch `why-rewrite` (latest code: 8e1f377) and verified by a live run. Merged to `main` via PR #2. Tests: 102 passing.
 
 ## Phase 1 — Reliability ✅
 
@@ -26,7 +26,8 @@ Session tracker for the Why pipeline rewrite. Update as items land.
   - 7 a16z announcements filtered; ledger commit pushed by the bot (57372a9), no tokens in file
 - [x] Phase 2 + Phase 3 committed (8e1f377); manual run [42466438864](https://github.com/laurenyyg/tech-signals-bot/actions/runs/42466438864): success — DL.AI Nov 6 letter (61 → 2,751 chars) summarised and posted, 9 items skipped by ledger, bot ledger commit ef910f3 (no tokens)
 - [x] Check the Slack post looks right (funnel line format, single DL.AI card) — funnel arithmetic checks out; zero-activity feeds are real (One Useful Thing last posted Oct 20)
-- [ ] Open PR `why-rewrite` → `main` and merge (Friday's scheduled run uses `main`)
+- [x] Open PR `why-rewrite` → `main` and merge — [PR #2](https://github.com/laurenyyg/tech-signals-bot/pull/2), merged as 45d7f25
+- [ ] Watch first live runs of the shared splitter: What (Sun Nov 8, 8:47 PM PDT), How synthesizer (Sat Nov 14), Why (Fri Nov 13)
 
 
 
