@@ -9,7 +9,7 @@ month-only dates, which stay in window all month) never repeat an item.
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from common import (
@@ -31,12 +31,21 @@ from common import (
 from config import (
     WHY_BODY_FETCH_SOURCES,
     WHY_BODY_MAX_CHARS,
+    WHY_DAYS_MAX,
+    WHY_DAYS_SLACK,
     WHY_ITEM_MAX_TOKENS,
     WHY_SEEN_RETENTION_DAYS,
 )
 from fetchers.why_fetcher import DAYS_FILTER, FEEDS, WhyFetcher
 from prompts import WHY_PROFILE_PROMPT
-from seen_ledger import canonical_url, load_json_list, mark_seen, prune_seen, save_json_list
+from seen_ledger import (
+    canonical_url,
+    latest_processed_at,
+    load_json_list,
+    mark_seen,
+    prune_seen,
+    save_json_list,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +68,17 @@ SOURCE_LABELS: Dict[str, str] = {
     "ben-evans": "Benedict Evans",
     "a16z": "a16z",
     "one-useful-thing": "One Useful Thing",
+}
+
+# Funnel source names link to the publication homepage (not RSS or the a16z API).
+FEED_HOME_URLS: Dict[str, str] = {
+    "stratechery": "https://stratechery.com/",
+    "stratechery-podcasts": "https://stratechery.com/",
+    "deeplearning-ai": "https://www.deeplearning.ai/the-batch/tag/letters/",
+    "ben-evans-essays": "https://www.ben-evans.com/",
+    "ben-evans-presentations": "https://www.ben-evans.com/",
+    "a16z": "https://www.a16z.news/",
+    "one-useful-thing": "https://www.oneusefulthing.org/",
 }
 
 Item = Dict[str, Any]
@@ -84,6 +104,22 @@ def drop_seen(items: List[Item], seen_keys: Set[str]) -> Tuple[List[Item], List[
     fresh = [item for item in items if ledger_key(item) not in seen_keys]
     dropped = [item for item in items if ledger_key(item) in seen_keys]
     return fresh, dropped
+
+
+def fetch_cutoff(seen: List[Dict[str, Any]], now: datetime) -> datetime:
+    """Oldest publish date to fetch.
+
+    Normal weeks stay at DAYS_FILTER (8). After a missed run the window stretches
+    back to the last successful post minus WHY_DAYS_SLACK, capped at WHY_DAYS_MAX.
+    An empty ledger uses the 8-day floor so a first run does not re-post a month.
+    """
+    floor = now - timedelta(days=DAYS_FILTER)
+    last = latest_processed_at(seen)
+    if last is None:
+        return floor
+    recovered = last - timedelta(days=WHY_DAYS_SLACK)
+    ceiling = now - timedelta(days=WHY_DAYS_MAX)
+    return max(ceiling, min(floor, recovered))
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +260,21 @@ def build_funnel(
     return funnel
 
 
+def _feed_label(feed: str) -> str:
+    """Slack mrkdwn for a funnel feed name, linked when we have a homepage."""
+    url = FEED_HOME_URLS.get(feed)
+    if url:
+        return f"*<{url}|{feed}>*"
+    return f"*{feed}*"
+
+
 def funnel_line(feed: str, counts: Dict[str, int]) -> str:
-    """'📡 *a16z*   25 fetched › 7 in window › 7 new › 7 summarised  (7 announcements skipped)'."""
+    """'📡 *<https://www.a16z.news/|a16z>*   25 fetched › 7 in window › …'."""
+    label = _feed_label(feed)
     if counts.get("fetch_failed"):
-        return f"📡 *{feed}*   fetch failed"
+        return f"📡 {label}   fetch failed"
     line = (
-        f"📡 *{feed}*   {counts.get('fetched', 0)} fetched › {counts.get('in_window', 0)} in window"
+        f"📡 {label}   {counts.get('fetched', 0)} fetched › {counts.get('in_window', 0)} in window"
         f" › {counts.get('new', 0)} new › {counts.get('summarised', 0)} summarised"
     )
     notes: List[str] = []
@@ -244,6 +289,29 @@ def funnel_line(feed: str, counts: Dict[str, int]) -> str:
     if notes:
         line += f"  ({', '.join(notes)})"
     return line
+
+
+def funnel_lines(funnel: Dict[str, Dict[str, int]]) -> List[str]:
+    """One line per active or failed feed; zero-in-window feeds share a quiet line.
+
+    Feeds not present in `funnel` are omitted (tests pass a partial dict). Failed
+    fetches never fold, even when in_window is 0.
+    """
+    lines: List[str] = []
+    quiet: List[str] = []
+    quiet_fetched = 0
+    feeds = [feed for feed in FEEDS if feed in funnel] or list(funnel)
+    for feed in feeds:
+        counts = funnel.get(feed) or {}
+        if not counts.get("fetch_failed") and counts.get("in_window", 0) == 0:
+            quiet.append(feed)
+            quiet_fetched += counts.get("fetched", 0)
+        else:
+            lines.append(funnel_line(feed, counts))
+    if quiet:
+        names = ", ".join(_feed_label(feed) for feed in quiet)
+        lines.append(f"📡 quiet: {names}  ({quiet_fetched} fetched, 0 in window)")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +365,7 @@ def build_why_slack_payloads(
     total_tokens: Optional[int] = None,
     budget_status: Optional[str] = None,
     max_tokens: int = 0,
+    window_days: int = DAYS_FILTER,
 ) -> List[Dict[str, Any]]:
     """Build the Why digest as one or more Slack messages (see split_into_messages).
 
@@ -304,14 +373,14 @@ def build_why_slack_payloads(
     on the last message.
     """
     footer = build_footer(total_tokens, budget_status, max_tokens=max_tokens)
-    title = f"Why Signals Digest — {len(signals)} item(s) | {date_range_str(DAYS_FILTER)}"
+    title = f"Why Signals Digest — {len(signals)} item(s) | {date_range_str(window_days)}"
 
     groups: List[List[Block]] = [
         [_signal_section(signal), {"type": "divider"}] for signal in signals
     ]
     if not signals and not failures:
         groups.append([section_block(
-            f"_No new essays or presentations in the last {DAYS_FILTER} days._"
+            f"_No new essays or presentations in the last {window_days} days._"
         )])
 
     warnings: List[str] = []
@@ -323,8 +392,11 @@ def build_why_slack_payloads(
             name = f"<{item['link']}|{name}>"
         warnings.append(f"⚠️ Not summarised: {name} — {_short(error)}")
 
-    funnel_lines = [funnel_line(feed, counts) for feed, counts in (funnel or {}).items()]
-    tail = context_blocks(warnings) + context_blocks(funnel_lines) + context_blocks([f"\n{footer}"])
+    tail = (
+        context_blocks(warnings)
+        + context_blocks(funnel_lines(funnel or {}))
+        + context_blocks([f"\n{footer}"])
+    )
     return split_into_messages(title, groups, tail)
 
 
@@ -344,8 +416,11 @@ def run_why_pipeline(webhook_url: str, usage_meta: Dict[str, Any]) -> None:
     """
     now = datetime.now(timezone.utc)
     seen = prune_seen(load_json_list(SEEN_FILE), now, WHY_SEEN_RETENTION_DAYS)
+    cutoff = fetch_cutoff(seen, now)
+    window_days = max(1, (now - cutoff).days)
+    logger.info(f"Fetch window: {window_days}d (cutoff {cutoff.date()})")
 
-    fetcher = WhyFetcher()
+    fetcher = WhyFetcher(cutoff=cutoff)
     items, already_posted = drop_seen(fetcher.fetch(), {e["url"] for e in seen})
     if already_posted:
         logger.info(f"Seen ledger: skipped {len(already_posted)} already-posted item(s).")
@@ -372,6 +447,7 @@ def run_why_pipeline(webhook_url: str, usage_meta: Dict[str, Any]) -> None:
         total_tokens=usage_meta.get("total_tokens", 0),
         budget_status=usage_meta.get("budget_status", "OK"),
         max_tokens=usage_meta.get("max_tokens", 0),
+        window_days=window_days,
     )
     post_payloads(webhook_url, payloads, post=post_to_slack)  # raises — ledger left untouched
 

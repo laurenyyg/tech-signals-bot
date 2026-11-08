@@ -41,7 +41,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 ### `--profile what` — What happened in tech?
 
-**Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News via RSS; Anthropic news and research via SSR HTML scraping.
+**Sources**: Techmeme, TechCrunch, OpenAI News via RSS; Anthropic news and research via SSR HTML scraping.
 
 **Pre-LLM pipeline**:
 1. Fetch all feeds → raw items
@@ -66,7 +66,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 **Pre-LLM pipeline**:
 1. Fetch all sources → raw items. A source that errors, returns nothing, or whose entries all fail to parse is reported as a ⚠️ line in the digest instead of being silently skipped.
-2. Drop items outside an 8-day rolling window (one day of slack for late scheduled runs). Items without a parsable date are skipped. Date-only values (e.g. DeepLearning.AI's `Nov 6, 2026`) count as the whole day, so items published on the cutoff day aren't dropped.
+2. Drop items outside the fetch window. The floor is 8 days (one day of slack for late scheduled runs). After a missed run the window stretches back to the last successful post minus one day, capped at 30 days, so last week's items are recovered instead of ageing out. An empty ledger uses the 8-day floor. Items without a parsable date are skipped. Date-only values (e.g. DeepLearning.AI's `Nov 6, 2026`) count as the whole day, so items published on the cutoff day aren't dropped.
 3. Stratechery deduplication: articles win over podcasts on same title
 4. Drop items already posted in a previous week (`data/why_seen.json`). This lets the 8-day window overlap the weekly cadence, and lets month-only dates ("Nov 2026") stay in window all month, without repeats. The ledger is updated only after a successful Slack post and committed by the workflow; Stratechery access tokens are stripped from its keys.
 5. Fetch full article text for sources whose feeds only give excerpts (a16z, Ben Evans, DeepLearning.AI). Stratechery and One Useful Thing already carry full text in RSS and are never fetched.
@@ -87,7 +87,9 @@ Each digest ends with ⚠️ lines for failed sources and unsummarised items, a 
 ```
 📡 a16z   25 fetched › 7 in window › 2 new › 2 summarised  (5 announcements skipped)
 📡 stratechery   50 fetched › 2 in window › 0 new › 0 summarised  (2 already posted)
+📡 quiet: ben-evans-essays, ben-evans-presentations, one-useful-thing  (26 fetched, 0 in window)
 ```
+Source names in the funnel are Slack links to the publication homepage.
 
 **Schedule**: Fridays at 4:37 PM Vancouver time.
 

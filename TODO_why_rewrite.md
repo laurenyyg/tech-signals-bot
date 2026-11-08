@@ -56,8 +56,9 @@ Session tracker for the Why pipeline rewrite. Update as items land.
 ## Open decisions
 
 - [x] Stratechery links carry `?access_token=<JWT>` into Slack — **keep** (sole-member channel); ledger stays token-free
-- [ ] With the ledger, widen `DAYS_FILTER` (8 → ~14) so a failed week's items are recovered next run? — **parked**; downsides discussed (one-time re-post of Oct 25–30 items, more reliance on stable ledger keys, double retries). Alternative: cutoff = last successful post − 1 day
-- [ ] Parked polish: fold zero-activity feeds into one funnel line; "Read letter" label for DeepLearning.AI
+- [x] Fetch window stretches to last successful post − 1 day after a missed run (`fetch_cutoff`: floor 8, cap 30). Empty ledger still uses the 8-day floor
+- [x] Fold zero-activity feeds into one funnel line (`📡 quiet: … (N fetched, 0 in window)`); failed fetches stay on their own line
+- [ ] Parked polish: "Read letter" label for DeepLearning.AI
 - [x] a16z "Charts of the Week" roundups — **keep** (not in the skip lists)
 
 

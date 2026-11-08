@@ -6,7 +6,7 @@ pruned to a retention window on every write.
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _DROPPED_QUERY_PARAMS = {
@@ -48,6 +48,19 @@ def prune_seen(
         except (KeyError, TypeError, ValueError):
             continue
     return kept
+
+
+def latest_processed_at(seen: List[Dict[str, Any]]) -> Optional[datetime]:
+    """Newest parsable processed_at in the ledger, or None if the ledger is empty."""
+    latest: Optional[datetime] = None
+    for entry in seen:
+        try:
+            stamp = datetime.fromisoformat(entry["processed_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if latest is None or stamp > latest:
+            latest = stamp
+    return latest
 
 
 def mark_seen(
