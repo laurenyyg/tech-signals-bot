@@ -12,7 +12,8 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import anthropic
 from dotenv import load_dotenv
@@ -33,14 +34,24 @@ from common import (
     split_into_messages,
     strip_html,
 )
-from config import SUMMARY_TRUNCATE_CHARS
-from fetchers.rss_fetcher import (
-    DAYS_FILTER as WHAT_DAYS_FILTER,
-    RssFetcher,
-    funnel_lines,
+from config import (
+    SUMMARY_TRUNCATE_CHARS,
+    WHAT_DAYS_FILTER,
+    WHAT_DAYS_MAX,
+    WHAT_DAYS_SLACK,
+    WHAT_SEEN_RETENTION_DAYS,
 )
+from fetchers.rss_fetcher import TOP_N, RssFetcher, funnel_lines
 from how_pipeline import FOOTER_MODEL_LABEL as HOW_FOOTER_MODEL_LABEL, run_how_pipeline
 from prompts import WHAT_PROFILE_PROMPT
+from seen_ledger import (
+    canonical_url,
+    latest_processed_at,
+    load_json_list,
+    mark_seen,
+    prune_seen,
+    save_json_list,
+)
 from sheets_writer import append_what_run, compute_relevant_per_source
 from why_pipeline import run_why_pipeline
 
@@ -48,6 +59,9 @@ load_dotenv()
 
 configure_logging()
 logger = logging.getLogger(__name__)
+
+SEEN_FILE = "data/what_seen.json"
+Item = Dict[str, Any]
 
 PROFILES: Dict[str, Dict[str, Any]] = {
     "what": {
@@ -62,6 +76,41 @@ STANDALONE_PROFILES: Dict[str, Dict[str, Any]] = {
     "why": {"webhook_env": "WHY_WEBHOOK_URL"},
     "how": {"webhook_env": "HOW_WEBHOOK_URL"},
 }
+
+
+# ---------------------------------------------------------------------------
+# Seen ledger
+# ---------------------------------------------------------------------------
+
+def ledger_key(item: Item) -> str:
+    """Canonical link, else source+title."""
+    url = item.get("link") or ""
+    if url:
+        return canonical_url(url)
+    return f"{item.get('source', '')}:{item.get('title', '').strip().lower()}"
+
+
+def drop_seen(items: List[Item], seen_keys: Set[str]) -> Tuple[List[Item], List[Item]]:
+    """Return (unseen items, items dropped as already posted)."""
+    fresh = [item for item in items if ledger_key(item) not in seen_keys]
+    dropped = [item for item in items if ledger_key(item) in seen_keys]
+    return fresh, dropped
+
+
+def fetch_cutoff(seen: List[Dict[str, Any]], now: datetime) -> datetime:
+    """Oldest publish date to fetch.
+
+    Normal weeks stay at WHAT_DAYS_FILTER (8). After a missed run the window
+    stretches back to the last successful post minus WHAT_DAYS_SLACK, capped at
+    WHAT_DAYS_MAX (14). An empty ledger uses the 8-day floor.
+    """
+    floor = now - timedelta(days=WHAT_DAYS_FILTER)
+    last = latest_processed_at(seen)
+    if last is None:
+        return floor
+    recovered = last - timedelta(days=WHAT_DAYS_SLACK)
+    ceiling = now - timedelta(days=WHAT_DAYS_MAX)
+    return max(ceiling, min(floor, recovered))
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +199,7 @@ def build_slack_payloads(
     total_tokens: Optional[int] = None,
     budget_status: Optional[str] = None,
     source_errors: Optional[Dict[str, str]] = None,
+    window_days: int = WHAT_DAYS_FILTER,
 ) -> List[Dict[str, Any]]:
     """Build the What digest as one or more Slack messages (see split_into_messages).
 
@@ -186,11 +236,11 @@ def build_slack_payloads(
     ]
     tail = (
         context_blocks(warnings)
-        + context_blocks(funnel_lines(source_counts or {}))
+        + context_blocks(funnel_lines(source_counts or {}, window_days))
         + footer_blocks
     )
     return split_into_messages(
-        f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(WHAT_DAYS_FILTER)}",
+        f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(window_days)}",
         groups,
         tail,
     )
@@ -227,13 +277,30 @@ def main() -> None:
             runner(webhook, usage_meta)
             return
 
-        # 1. Fetch
-        fetcher = profile["fetcher_cls"]()
-        items: List[Dict[str, Any]] = fetcher.fetch()
-        logger.info(f"Profile '{args.profile}': {len(items)} scored items ready for LLM")
+        now = datetime.now(timezone.utc)
+        seen = prune_seen(load_json_list(SEEN_FILE), now, WHAT_SEEN_RETENTION_DAYS)
+        cutoff = fetch_cutoff(seen, now)
+        window_days = max(1, (now - cutoff).days)
+        logger.info(f"Fetch window: {window_days}d (cutoff {cutoff.date()})")
 
+        fetcher = profile["fetcher_cls"](cutoff=cutoff)
+        scored: List[Dict[str, Any]] = fetcher.fetch()
         source_counts: Dict[str, Dict[str, int]] = getattr(fetcher, "source_counts", {})
         source_errors: Dict[str, str] = getattr(fetcher, "source_errors", {})
+
+        items, already_posted = drop_seen(scored, {e["url"] for e in seen})
+        for item in already_posted:
+            src = item.get("source", "")
+            if src in source_counts:
+                source_counts[src]["already_posted"] += 1
+        if already_posted:
+            logger.info(f"Seen ledger: skipped {len(already_posted)} already-posted item(s).")
+
+        items = items[:TOP_N]
+        for item in items:
+            if item.get("source") in source_counts:
+                source_counts[item["source"]]["sent_to_llm"] += 1
+        logger.info(f"Profile '{args.profile}': {len(items)} scored items ready for LLM")
 
         webhook_url = os.getenv(profile["webhook_env"])
         if not webhook_url:
@@ -249,6 +316,7 @@ def main() -> None:
                 source_errors=source_errors,
                 total_tokens=0,
                 budget_status="OK",
+                window_days=window_days,
             )
             post_payloads(webhook_url, payloads, post=post_to_slack)
             return
@@ -282,9 +350,14 @@ def main() -> None:
             signals,
             source_counts=source_counts,
             source_errors=source_errors,
+            window_days=window_days,
             **usage_meta,
         )
-        post_payloads(webhook_url, payloads, post=post_to_slack)
+        post_payloads(webhook_url, payloads, post=post_to_slack)  # raises — ledger left untouched
+
+        seen = mark_seen(seen, [ledger_key(item) for item in items], now)
+        save_json_list(SEEN_FILE, seen)
+        logger.info(f"Seen ledger now has {len(seen)} item(s).")
 
     except Exception as exc:
         error_msg = str(exc)

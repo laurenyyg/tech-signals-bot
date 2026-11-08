@@ -30,6 +30,14 @@ A16Z_SKIP_TITLE_PREFIXES: List[str] = [
 ]
 A16Z_SKIP_TITLE_SUBSTRINGS: List[str] = ["a16z"]
 
+# What profile: floor window (one day of slack for a late Sunday run). After a
+# missed week the window stretches to last ledger processed_at minus WHAT_DAYS_SLACK,
+# capped at WHAT_DAYS_MAX (one missed Sunday). Empty ledger uses the floor.
+WHAT_DAYS_FILTER: int = 8
+WHAT_DAYS_SLACK: int = 1
+WHAT_DAYS_MAX: int = 14
+WHAT_SEEN_RETENTION_DAYS: int = 60  # Must stay well above WHAT_DAYS_MAX.
+
 # How profile
 HOW_DAYS_FILTER: int = 3  # Fetch window; must stay well below HOW_SEEN_RETENTION_DAYS.
 HOW_SEEN_RETENTION_DAYS: int = 60

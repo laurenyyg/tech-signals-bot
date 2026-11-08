@@ -45,13 +45,13 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 
 **Pre-LLM pipeline**:
 1. Fetch all feeds → raw items. A source that errors, returns no entries, whose entries all fail to parse, or whose Anthropic SSR page has no posts is reported as a ⚠️ line instead of being silently skipped.
-2. Drop items outside the 7-day window. Items without a parsable date are skipped.
+2. Drop items outside the fetch window. The floor is 8 days (one day of slack for late scheduled runs). After a missed run the window stretches back to the last successful post minus one day, capped at 14 days. An empty ledger uses the 8-day floor. Items without a parsable date are skipped.
 3. Three-pass cross-feed deduplication:
    - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
    - Pass 2: Normalised title (strips ` | TechCrunch`, ` - Techmeme`-style suffixes)
    - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). Invalid or partial index covers are ignored; the pre-semantic list is kept.
 4. Keyword score against `KEYWORD_WHITELIST` (ASCII whole-word match). Drop zero-score items.
-5. Keep top 40 by score. An empty week still posts the digest (funnel + source errors, no Sonnet call).
+5. Drop URLs already posted (`data/what_seen.json`). Keep top 40 of the rest. An empty week still posts the digest (funnel + source errors, no Sonnet call). The ledger is updated only after a successful Slack post and committed by the workflow.
 
 **LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications.
 

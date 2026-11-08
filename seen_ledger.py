@@ -1,4 +1,4 @@
-"""JSON-file state shared by the How and Why pipelines: lists and the seen-URL ledger.
+"""JSON-file state shared by the How, Why, and What pipelines: lists and the seen-URL ledger.
 
 A ledger is a JSON array of {"url": ..., "processed_at": ISO timestamp} entries,
 pruned to a retention window on every write.

@@ -50,11 +50,11 @@ Haiku must return every index exactly once. A partial JSON array silently drops 
 
 ## Phase 4 — Memory / missed runs
 
-7-day window, weekly cron, no ledger. A missed Sunday drops that week; a successful run can re-send the overlapping day. Why already has `fetch_cutoff()` + `data/why_seen.json`.
+Ledger + stretch (floor 8, cap 14), same shape as Why. `data/what_seen.json` is committed by the workflow after Slack succeeds.
 
-- [ ] Decide: stretch window after a missed run (Why’s `fetch_cutoff`, floor 7, cap ~30) vs a What seen ledger
-- [ ] If ledger: write only after a successful Slack post; workflow commits the file
-- [ ] Update funnel copy so “in last Nd” reflects the actual window
+- [x] Decide: stretch window after a missed run (Why’s `fetch_cutoff`, floor 7, cap ~30) vs a What seen ledger — **ledger + stretch, floor 8, cap 14**
+- [x] If ledger: write only after a successful Slack post; workflow commits the file
+- [x] Update funnel copy so “in last Nd” reflects the actual window
 
 
 
