@@ -16,7 +16,7 @@
 
 ### What Profile
 - **Sources**: Techmeme, TechCrunch, and OpenAI News via RSS (`feedparser`); Anthropic news and research via SSR HTML scraping (Sanity CMS is no longer publicly accessible without auth).
-- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- CoinDesk` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
+- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- Techmeme` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
 - **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts items with score > 0 per feed after dedup (before top-40 cut); `source_counts["sent_to_llm"]` reflects the final top-40 batch.
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
@@ -55,7 +55,7 @@
 - **Max tokens**: 16,000 output token budget for Sonnet calls.
 - **Haiku (What dedup)**: `claude-haiku-4-5-20251001` — semantic cross-feed deduplication only.
 - **Haiku (How bouncer)**: `claude-haiku-4-5-20251001` — Stage 1 cognitive filter, max 1024 output tokens. (`claude-3-5-haiku-20241022` is retired and returns 404.)
-- **Persona (What)**: Ruthless intelligence analyst — no PR fluff, ELI5 mechanics, Boglehead investment lens, cluster related items, drop non-structural noise. Focus areas: AI model releases/breakthroughs, real-world AI impact evidence, crypto protocol shifts, semiconductor/compute infra, structural regulation.
+- **Persona (What)**: Ruthless intelligence analyst — no PR fluff, ELI5 mechanics, Boglehead investment lens, cluster related items, drop non-structural noise. Focus areas: AI model releases/breakthroughs, real-world AI impact evidence, semiconductor/compute infra, structural regulation.
 - **Persona (Why)**: Strategic intelligence analyst — dense bullet-point summaries extracting core thesis and second-order infrastructure/economic implications.
 - **Persona (How)**: Ruthless reverse-engineer — extracts replicable SOPs, ignores personal stories and fluff. Three-step output: Trigger → Process → Output.
 

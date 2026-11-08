@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 FEEDS: Dict[str, str] = {
     "techmeme": "https://www.techmeme.com/feed.xml",
-    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
     "techcrunch": "https://techcrunch.com/feed/",
     "openai_news": "https://openai.com/news/rss.xml",
 }
@@ -33,21 +32,14 @@ _TRACKING_QUERY_EXACT = frozenset(
     {"fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "_ga"}
 )
 
-# Strip trailing " | TechCrunch" / " - CoinDesk" style suffixes for title-level dedupe.
+# Strip trailing " | TechCrunch" / " - Techmeme" style suffixes for title-level dedupe.
 _TITLE_SUFFIX_RE = re.compile(
-    r"\s*([|–—\-])\s*(techcrunch|coindesk|techmeme)\s*$",
+    r"\s*([|–—\-])\s*(techcrunch|techmeme)\s*$",
     re.IGNORECASE,
 )
 
-# Keyword → score weight. Higher = more relevant to the Crypto/AI/Tech focus.
+# Keyword → score weight. Higher = more relevant to the AI/tech focus.
 KEYWORD_WHITELIST: Dict[str, int] = {
-    # Crypto fundamentals
-    "bitcoin": 3, "btc": 3, "ethereum": 3, "eth": 3, "crypto": 2,
-    "blockchain": 2, "defi": 3, "nft": 1, "web3": 2, "layer2": 3,
-    "layer 2": 3, "l2": 3, "solana": 2, "stablecoin": 3, "cbdc": 3,
-    "dao": 2, "protocol": 2, "consensus": 3, "proof of stake": 3,
-    "proof of work": 3, "validator": 2, "smart contract": 2,
-    "dex": 2, "liquidity": 2, "yield": 1,
     # AI / LLM
     "artificial intelligence": 3, "machine learning": 2,
     "llm": 3, "large language model": 3, "foundation model": 3,
@@ -63,15 +55,15 @@ KEYWORD_WHITELIST: Dict[str, int] = {
     "compute": 2, "energy": 2, "power grid": 3, "nuclear": 2,
     "cloud": 1, "open source": 2,
     # Macro / Regulation
-    "regulation": 2, "sec": 2, "cftc": 2, "fed": 1, "federal reserve": 2,
-    "interest rate": 2, "etf": 2, "institutional": 2, "treasury": 2,
+    "regulation": 2, "sec": 2, "fed": 1, "federal reserve": 2,
+    "interest rate": 2, "institutional": 2, "treasury": 2,
     "congress": 2, "legislation": 2,
 }
 
 TOP_N = 40
 DAYS_FILTER = 7
 
-# Mimic a real browser so sites like CoinDesk don't silently return empty feeds.
+# Mimic a real browser so some RSS hosts don't silently return empty feeds.
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
