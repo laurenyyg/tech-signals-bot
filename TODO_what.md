@@ -2,7 +2,7 @@
 
 Session tracker for tightening the What pipeline (fetch → score → dedupe → Sonnet → Slack). Update as items land.
 
-**Status:** On branch `what-profile`. Crypto sources/keywords and 机器之心 are already gone (`5979541`, `d8d6f66`). The remaining work is the sieve, source health, and tests.
+**Status:** On branch `what-profile`. Phases 1–5 are done except the parked Phase 1 brand-keyword item. Crypto sources/keywords and 机器之心 are already gone (`5979541`, `d8d6f66`).
 
 ## Already done
 
@@ -50,30 +50,30 @@ Haiku must return every index exactly once. A partial JSON array silently drops 
 
 ## Phase 4 — Memory / missed runs
 
-7-day window, weekly cron, no ledger. A missed Sunday drops that week; a successful run can re-send the overlapping day. Why already has `fetch_cutoff()` + `data/why_seen.json`.
+Ledger + stretch (floor 8, cap 14), same shape as Why. `data/what_seen.json` is committed by the workflow after Slack succeeds.
 
-- [ ] Decide: stretch window after a missed run (Why’s `fetch_cutoff`, floor 7, cap ~30) vs a What seen ledger
-- [ ] If ledger: write only after a successful Slack post; workflow commits the file
-- [ ] Update funnel copy so “in last Nd” reflects the actual window
+- [x] Decide: stretch window after a missed run (Why’s `fetch_cutoff`, floor 7, cap ~30) vs a What seen ledger — **ledger + stretch, floor 8, cap 14**
+- [x] If ledger: write only after a successful Slack post; workflow commits the file
+- [x] Update funnel copy so “in last Nd” reflects the actual window
 
 
 
 ## Phase 5 — Tests and docs
 
-`tests/test_rss_fetcher.py` only covers URL/title dedupe.
+`tests/test_rss_fetcher.py` covers URL/title dedupe, scoring, source health, semantic groups, the window/ledger, Anthropic SSR, and `source_ids` resolution.
 
-- [ ] Anthropic SSR parser: fixture HTML (no live HTTP)
+- [x] Anthropic SSR parser: fixture HTML (no live HTTP)
 - [x] Date window: in-window / too old / undated skipped
-- [ ] `source_ids` → `source_urls` resolution (unknown ids dropped)
-- [ ] Update `AGENTS.md` / `README.md` when sieve, health, or window behavior changes
+- [x] `source_ids` → `source_urls` resolution (unknown ids dropped)
+- [x] Update `AGENTS.md` / `README.md` when sieve, health, or window behavior changes
 
 
 
 ## Parked
 
-- [ ] Sheets write currently runs *before* Slack; a failed post still appends a run. Move to after `post_payloads` succeeds
-- [ ] Sheets “Relevant (LLM) / Total (7d)” mixes source volume with Sonnet citation taste — not the same as keyword-relevant / fetched
-- [ ] Unused `NewsSignal` in `models.py`; unused `SUMMARY_TRUNCATE_CHARS` import in `rss_fetcher.py`
+- [x] Sheets write currently runs *before* Slack; a failed post still appends a run. Move to after `post_payloads` succeeds
+- [x] Sheets “Relevant (LLM) / Total (7d)” mixes source volume with Sonnet citation taste — not the same as keyword-relevant / fetched
+- [x] Unused `NewsSignal` in `models.py`; unused `SUMMARY_TRUNCATE_CHARS` import in `rss_fetcher.py`
 - [ ] Do **not** start with a How-style Haiku bouncer or fetching full TechCrunch bodies — the sieve is the bug; Sonnet is already the analyst
 
 

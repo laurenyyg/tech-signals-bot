@@ -139,7 +139,7 @@ def test_what_payloads_split_and_keep_funnel_on_last_message() -> None:
     cards = sum(1 for p in payloads for b in p["blocks"] if b["type"] == "section")
     assert cards == 30
     last = str(payloads[-1])
-    assert "📡 *Techmeme*" in last and "Model:" in last
+    assert "📡 *<https://www.techmeme.com/|Techmeme>*" in last and "Model:" in last
     assert all("Model:" not in str(p) for p in payloads[:-1])
 
 
@@ -168,6 +168,21 @@ def test_what_payloads_empty_keeps_warnings_and_funnel() -> None:
     text = str(payloads[0])
     assert "No structurally significant" in text
     assert "⚠️ *techmeme* fetch failed: feed returned no entries" in text
-    assert "📡 *Techmeme*   fetch failed" in text
-    assert "📡 quiet: *Techcrunch*" in text
+    assert "📡 *<https://www.techmeme.com/|Techmeme>*   fetch failed" in text
+    assert "📡 quiet: *<https://techcrunch.com/|Techcrunch>*" in text
     assert "Model:" in text
+    assert "Sheets" not in text
+
+
+def test_what_payloads_footer_links_spreadsheet() -> None:
+    from main import build_slack_payloads
+
+    payloads = build_slack_payloads(
+        [],
+        {},
+        total_tokens=0,
+        budget_status="OK",
+        spreadsheet_id="1abcTEST",
+    )
+    text = str(payloads[0])
+    assert "<https://docs.google.com/spreadsheets/d/1abcTEST|Sheets>" in text

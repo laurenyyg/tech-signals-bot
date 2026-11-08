@@ -164,10 +164,14 @@ def build_footer(
     budget_status: Optional[str],
     model_label: str = MODEL_ID,
     max_tokens: int = MAX_TOKENS,
+    extra: str = "",
 ) -> str:
     tokens = f"{total_tokens}/{max_tokens}" if total_tokens is not None else "N/A"
     budget = budget_status if budget_status is not None else "N/A"
-    return f"_Model: {model_label} | Tokens: {tokens} | Budget: {budget}_"
+    line = f"Model: {model_label} | Tokens: {tokens} | Budget: {budget}"
+    if extra:
+        line = f"{line} | {extra}"
+    return f"_{line}_"
 
 
 def build_error_payload(error_msg: str, footer: str) -> Dict[str, Any]:

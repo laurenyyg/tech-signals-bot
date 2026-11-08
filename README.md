@@ -45,17 +45,17 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 
 **Pre-LLM pipeline**:
 1. Fetch all feeds → raw items. A source that errors, returns no entries, whose entries all fail to parse, or whose Anthropic SSR page has no posts is reported as a ⚠️ line instead of being silently skipped.
-2. Drop items outside the 7-day window. Items without a parsable date are skipped.
+2. Drop items outside the fetch window. The floor is 8 days (one day of slack for late scheduled runs). After a missed run the window stretches back to the last successful post minus one day, capped at 14 days. An empty ledger uses the 8-day floor. Items without a parsable date are skipped.
 3. Three-pass cross-feed deduplication:
    - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
    - Pass 2: Normalised title (strips ` | TechCrunch`, ` - Techmeme`-style suffixes)
    - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). Invalid or partial index covers are ignored; the pre-semantic list is kept.
 4. Keyword score against `KEYWORD_WHITELIST` (ASCII whole-word match). Drop zero-score items.
-5. Keep top 40 by score. An empty week still posts the digest (funnel + source errors, no Sonnet call).
+5. Drop URLs already posted (`data/what_seen.json`). Keep top 40 of the rest. An empty week still posts the digest (funnel + source errors, no Sonnet call). The ledger is updated only after a successful Slack post and committed by the workflow.
 
-**LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications.
+**LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications. Numeric `source_ids` are resolved to URLs after the call; unknown ids are dropped.
 
-**Post-run**: Per-source performance stats (fetched, in-window, relevant, sent-to-LLM) are appended to a Google Spreadsheet.
+**Post-run**: After Slack succeeds, per-source sieve stats (keyword-relevant, fetched, ratio) are appended to a Google Spreadsheet. A Sheets failure is logged and does not undo the post. The digest funnel links each source to its homepage; the FinOps footer links the spreadsheet.
 
 **Schedule**: Sundays at 22:47 UTC (2:47 PM PST / 3:47 PM PDT).
 
@@ -186,7 +186,7 @@ how_pipeline.py           How weekly synthesizer + backlog state
 seen_ledger.py            JSON state helpers + seen-URL ledger (How and Why), URL canonicalisation
 catch_how.py              How daily catcher (no LLM)
 config.py                 Shared constants (keywords, author lists, truncation)
-models.py                 Dataclasses: NewsSignal, WhySignal, HowSignal
+models.py                 Dataclasses: WhySignal, HowSignal
 prompts.py                LLM system prompts for all three profiles
 sheets_writer.py          What profile — Google Sheets source tracking
 
