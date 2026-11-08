@@ -3,6 +3,11 @@ from typing import List
 
 SUMMARY_TRUNCATE_CHARS: int = 1500
 
+# How profile
+HOW_DAYS_FILTER: int = 3  # Fetch window; must stay well below HOW_SEEN_RETENTION_DAYS.
+HOW_SEEN_RETENTION_DAYS: int = 60
+HOW_BODY_MAX_CHARS: int = 12000
+
 DEEP_READ_KEYWORDS: List[str] = [
     "artificial intelligence",
     "moat",

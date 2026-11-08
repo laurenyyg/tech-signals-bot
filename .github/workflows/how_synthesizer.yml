@@ -27,12 +27,14 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HOW_WEBHOOK_URL: ${{ secrets.HOW_WEBHOOK_URL }}
+          DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
         run: python main.py --profile how
 
       - name: Commit and push state reset
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add data/how_backlog.json
+          git add data/how_backlog.json data/how_seen.json
           git commit -m "chore: reset how_backlog.json after successful slack delivery [skip ci]" || echo "No changes to commit"
+          git pull --rebase
           git push

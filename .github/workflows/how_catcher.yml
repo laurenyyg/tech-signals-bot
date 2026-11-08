@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "3 11 * * *" 
   workflow_dispatch:
+    inputs:
+      days:
+        description: "Fetch window in days (blank = default 3; use e.g. 14 to backfill)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -26,12 +31,15 @@ jobs:
       - name: Run How catcher
         env:
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
-        run: python catch_how.py
+          HOW_WEBHOOK_URL: ${{ secrets.HOW_WEBHOOK_URL }}
+          DAYS: ${{ inputs.days }}
+        run: python catch_how.py ${DAYS:+--days "$DAYS"}
 
       - name: Commit and push backlog
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add data/how_backlog.json
+          git add data/how_backlog.json data/how_seen.json
           git diff --cached --quiet || git commit -m "chore: update how_backlog.json [skip ci]"
+          git pull --rebase
           git push
