@@ -4,7 +4,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Pattern, Tuple
 
 import anthropic
 import requests
@@ -24,6 +24,22 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/123.0.0.0 Safari/537.36"
 )
+
+
+def keyword_pattern(keyword: str, *, hyphen_continues_word: bool = False) -> Pattern[str]:
+    """ASCII keywords match as whole words (so "AI" does not hit "PAID"); CJK as substrings.
+
+    When hyphen_continues_word is True, a match may not be the first stem of a
+    letter-hyphen compound ("meta" misses "meta-analysis") but a version suffix
+    still counts ("gpt" hits "GPT-5").
+    """
+    escaped = re.escape(keyword)
+    if not keyword.isascii():
+        return re.compile(escaped)
+    tail = r"(?![A-Za-z0-9])"
+    if hyphen_continues_word:
+        tail += r"(?!-[A-Za-z])"
+    return re.compile(rf"(?<![A-Za-z0-9]){escaped}{tail}", re.IGNORECASE)
 
 
 def configure_logging() -> None:

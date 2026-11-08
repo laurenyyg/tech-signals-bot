@@ -16,10 +16,13 @@
 
 ### What Profile
 - **Sources**: Techmeme, TechCrunch, and OpenAI News via RSS (`feedparser`); Anthropic news and research via SSR HTML scraping (Sanity CMS is no longer publicly accessible without auth).
-- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- Techmeme` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
-- **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts items with score > 0 per feed after dedup (before top-40 cut); `source_counts["sent_to_llm"]` reflects the final top-40 batch.
+- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- Techmeme` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). Haiku must return every index `0..n-1` exactly once (`parse_semantic_groups`); invalid JSON, markdown fences that still fail to parse, a partial cover, or an out-of-range index logs a warning and keeps the pre-semantic list. On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
+- **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST` via `keyword_pattern()` (ASCII whole-word match, same helper as How; letter-hyphen compounds do not match the stem, so `meta` misses `meta-analysis` but `gpt` still hits `GPT-5`). Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts items with score > 0 per feed after dedup (before top-40 cut); `source_counts["sent_to_llm"]` reflects the final top-40 batch.
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
+- **Source health**: Each source runs in its own guard (`RssFetcher.source_errors`). A source fails when the request raises, the RSS feed has no entries, every entry fails to parse (no date/title — a format change), or an Anthropic SSR page yields no posts (regex/layout change). Failed sources are listed as ⚠️ lines in the digest; they do not abort the run. Items with no parsable date are skipped (counted toward the all-entries-failed check), never treated as in-window.
+- **Empty week**: If nothing survives scoring, Sonnet is skipped and the digest still posts (empty copy + ⚠️ + funnel) so source errors stay visible. Never `sys.exit(0)` on “no items”.
+- **Funnel** (`funnel_line` / `funnel_lines` in `rss_fetcher.py`): one line per active source in `WHAT_SOURCES` order — `📡 *Source*   N fetched › N in last 7d › N relevant › N sent to LLM`. A source whose fetch failed shows `fetch failed` and is never folded. Feeds with `in_window == 0` collapse to one line: `📡 quiet: *Source*, …  (N fetched, 0 in window)`.
 
 ### Why Profile
 - **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win over podcasts; articles carry full text in RSS, podcast entries carry only a ~400-char episode description — no transcript), DeepLearning.AI (Andrew Ng letters, scraped from `/the-batch/tag/letters/`), Ben-Evans (essays + presentations), a16z (newsletter essays; announcements skipped via `a16z_skip_reason()`: posts tagged `A16Z_SKIP_TAGS` (`Fundraise`), titles starting with `A16Z_SKIP_TITLE_PREFIXES` ("Investing in", "Welcome", "Meet the", "Announcing", "Introducing", …), or mentioning "a16z"; lists in `config.py`), One Useful Thing (Ethan Mollick; public RSS).
@@ -72,6 +75,7 @@
 - 📰 **[Macro Event Name]**: `core_fact`
 - 🧠 **ELI5**: Simple mechanism breakdown.
 - 📈 **Second-Order Impact**: Infrastructure/long-term shift analysis.
+- ⚠️ lines for failed sources, then the per-source funnel (quiet feeds folded), before FinOps footer. An empty week still posts.
 
 ### Why Profile Visual Hierarchy
 - ❗️ Deep read (LLM-flagged) · 🧠 Standard essay · 🗂 Presentation · 🎙 Podcast

@@ -1,13 +1,12 @@
 import logging
 import os
-import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Pattern
 
 import feedparser
 
-from common import USER_AGENT
+from common import USER_AGENT, keyword_pattern
 from config import (
     HOW_DAYS_FILTER,
     HOW_NEGATIVE_KEYWORDS,
@@ -21,16 +20,8 @@ logger = logging.getLogger(__name__)
 FEED_URL = "https://sspai.com/feed"
 
 
-def _keyword_pattern(keyword: str) -> Pattern[str]:
-    """Latin keywords match as whole words (so "AI" doesn't hit "PAID"); CJK as substrings."""
-    escaped = re.escape(keyword)
-    if keyword.isascii():
-        return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", re.IGNORECASE)
-    return re.compile(escaped)
-
-
-_POSITIVE_PATTERNS: List[Pattern[str]] = [_keyword_pattern(k) for k in HOW_POSITIVE_KEYWORDS]
-_NEGATIVE_PATTERNS: List[Pattern[str]] = [_keyword_pattern(k) for k in HOW_NEGATIVE_KEYWORDS]
+_POSITIVE_PATTERNS: List[Pattern[str]] = [keyword_pattern(k) for k in HOW_POSITIVE_KEYWORDS]
+_NEGATIVE_PATTERNS: List[Pattern[str]] = [keyword_pattern(k) for k in HOW_NEGATIVE_KEYWORDS]
 
 
 def passes_how_filter(title: str, summary: str, author: str) -> bool:
