@@ -431,16 +431,19 @@ class WhyFetcher(BaseFetcher):
     gets a "feed" key matching its funnel entry.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cutoff: Optional[datetime] = None) -> None:
         self.funnel: Dict[str, Dict[str, int]] = {feed: {} for feed in FEEDS}
         self.source_errors: Dict[str, str] = {}
+        self.cutoff = cutoff if cutoff is not None else (
+            datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
+        )
         self._proxies = proxies_from_env()
         self._proxy_handler = (
             urllib.request.ProxyHandler(self._proxies) if self._proxies else None
         )
 
     def fetch(self) -> List[Item]:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
+        cutoff = self.cutoff
         f = self.funnel
 
         articles = self._guarded("stratechery", ["stratechery"], lambda: self._fetch_rss(
@@ -490,8 +493,9 @@ class WhyFetcher(BaseFetcher):
             items.extend(feed_items)
             logger.info(f"{feed}: {len(feed_items)} item(s) in window")
 
+        days = max(1, (datetime.now(timezone.utc) - cutoff).days)
         logger.info(
-            f"WhyFetcher: {len(items)} items in the last {DAYS_FILTER} days; "
+            f"WhyFetcher: {len(items)} items since {cutoff.date()} ({days}d window); "
             f"{len(self.source_errors)} source(s) failed"
         )
         return items

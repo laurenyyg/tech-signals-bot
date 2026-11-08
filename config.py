@@ -5,7 +5,11 @@ SUMMARY_TRUNCATE_CHARS: int = 1500
 
 # Why profile: output budget per item (one Sonnet call per item, thinking included).
 WHY_ITEM_MAX_TOKENS: int = 8000
-# Must exceed the fetch window plus a full month (month-only dates stay in window all month).
+# Floor window (DAYS_FILTER in why_fetcher.py). Stretches back to the last
+# successful post minus WHY_DAYS_SLACK after a missed run, capped at WHY_DAYS_MAX.
+WHY_DAYS_SLACK: int = 1
+WHY_DAYS_MAX: int = 30
+# Must exceed WHY_DAYS_MAX plus a full month (month-only dates stay in window all month).
 WHY_SEEN_RETENTION_DAYS: int = 60
 # Text sent to the LLM per item (What keeps SUMMARY_TRUNCATE_CHARS).
 WHY_BODY_MAX_CHARS: int = 12000

@@ -23,7 +23,9 @@ from why_pipeline import (
     build_funnel,
     build_why_slack_payloads,
     drop_seen,
+    fetch_cutoff,
     funnel_line,
+    funnel_lines,
     ledger_key,
     parse_why_response,
     summarize_items,
@@ -430,10 +432,11 @@ def _fetcher_returning(
     items: List[Dict[str, Any]], source_errors: Optional[Dict[str, str]] = None
 ) -> Any:
     class FakeFetcher:
-        def __init__(self) -> None:
+        def __init__(self, cutoff: Optional[datetime] = None) -> None:
             self.funnel: Dict[str, Dict[str, int]] = {
                 "a16z": {"fetched": len(items) + 5, "in_window": len(items) + 2, "filtered": 2},
             }
+            self.cutoff = cutoff
             self.source_errors: Dict[str, str] = dict(source_errors or {})
 
         def fetch(self) -> List[Dict[str, Any]]:
@@ -444,6 +447,36 @@ def _fetcher_returning(
 
 def _text(payloads: List[Dict[str, Any]]) -> str:
     return json.dumps(payloads, ensure_ascii=False)
+
+
+def test_run_why_pipeline_stretches_cutoff_after_a_gap(
+    monkeypatch: pytest.MonkeyPatch, _isolated_seen_file: str
+) -> None:
+    from seen_ledger import save_json_list
+
+    save_json_list(_isolated_seen_file, [{
+        "url": "https://x/old", "processed_at": (NOW - timedelta(days=14)).isoformat(),
+    }])
+    captured: List[Optional[datetime]] = []
+
+    class FakeFetcher:
+        def __init__(self, cutoff: Optional[datetime] = None) -> None:
+            captured.append(cutoff)
+            self.funnel: Dict[str, Dict[str, int]] = {}
+            self.source_errors: Dict[str, str] = {}
+
+        def fetch(self) -> List[Dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr(why_pipeline, "WhyFetcher", FakeFetcher)
+    monkeypatch.setattr(why_pipeline, "datetime", type(
+        "dt", (), {"now": staticmethod(lambda tz=None: NOW), "fromisoformat": datetime.fromisoformat}
+    ))
+    posted: List[Any] = []
+    monkeypatch.setattr(why_pipeline, "post_to_slack", lambda url, payload: posted.append(payload))
+    why_pipeline.run_why_pipeline("https://hooks.example", {})
+    assert captured == [NOW - timedelta(days=15)]
+    assert "last 15 days" in _text(posted)
 
 
 def test_run_why_pipeline_raises_when_every_item_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -496,7 +529,7 @@ def test_run_why_pipeline_ledger_skips_posted_and_retries_failed(
     assert "*good*" not in second and "*fresh*" in second
     assert "Not summarised" in second and "broken" in second
     assert (
-        "📡 *a16z*   8 fetched › 5 in window › 2 new › 1 summarised"
+        "📡 *<https://www.a16z.news/|a16z>*   8 fetched › 5 in window › 2 new › 1 summarised"
         "  (2 announcements skipped, 1 already posted, 1 failed, 2 excerpt only)"
     ) in second
     assert [e["url"] for e in load_json_list(_isolated_seen_file)] == [
@@ -560,18 +593,47 @@ def test_build_funnel_and_lines() -> None:
 
     assert list(funnel)[:2] == ["stratechery", "stratechery-podcasts"]
     assert funnel_line("stratechery", funnel["stratechery"]) == (
-        "📡 *stratechery*   50 fetched › 2 in window › 1 new › 1 summarised  (1 already posted)"
+        "📡 *<https://stratechery.com/|stratechery>*   50 fetched › 2 in window"
+        " › 1 new › 1 summarised  (1 already posted)"
     )
     assert funnel_line("stratechery-podcasts", funnel["stratechery-podcasts"]) == (
-        "📡 *stratechery-podcasts*   226 fetched › 1 in window › 0 new › 0 summarised"
-        "  (1 same as an article)"
+        "📡 *<https://stratechery.com/|stratechery-podcasts>*   226 fetched › 1 in window"
+        " › 0 new › 0 summarised  (1 same as an article)"
     )
     assert funnel_line("ben-evans-essays", funnel["ben-evans-essays"]) == (
-        "📡 *ben-evans-essays*   fetch failed"
+        "📡 *<https://www.ben-evans.com/|ben-evans-essays>*   fetch failed"
     )
     assert funnel_line("one-useful-thing", funnel["one-useful-thing"]) == (
-        "📡 *one-useful-thing*   0 fetched › 0 in window › 0 new › 0 summarised"
+        "📡 *<https://www.oneusefulthing.org/|one-useful-thing>*   0 fetched"
+        " › 0 in window › 0 new › 0 summarised"
     )
+    lines = funnel_lines(funnel)
+    assert lines[0].startswith("📡 *<https://stratechery.com/|stratechery>*")
+    assert lines[1].startswith("📡 *<https://stratechery.com/|stratechery-podcasts>*")
+    assert "ben-evans-essays>*   fetch failed" in lines[2]
+    assert lines[-1] == (
+        "📡 quiet: *<https://www.deeplearning.ai/the-batch/tag/letters/|deeplearning-ai>*, "
+        "*<https://www.ben-evans.com/|ben-evans-presentations>*, "
+        "*<https://www.a16z.news/|a16z>*, "
+        "*<https://www.oneusefulthing.org/|one-useful-thing>*"
+        "  (0 fetched, 0 in window)"
+    )
+    assert all("one-useful-thing>*" not in line for line in lines[:-1])
+
+
+def test_fetch_cutoff_floors_stretches_and_caps() -> None:
+    assert fetch_cutoff([], NOW) == CUTOFF
+
+    recent = [{"url": "https://x/a", "processed_at": (NOW - timedelta(days=3)).isoformat()}]
+    assert fetch_cutoff(recent, NOW) == CUTOFF
+
+    gap = [{"url": "https://x/a", "processed_at": (NOW - timedelta(days=14)).isoformat()}]
+    assert fetch_cutoff(gap, NOW) == NOW - timedelta(days=15)
+
+    stale = [{"url": "https://x/a", "processed_at": (NOW - timedelta(days=40)).isoformat()}]
+    assert fetch_cutoff(stale, NOW) == NOW - timedelta(days=30)
+    empty_stamp = [{"url": "https://x/a", "processed_at": "not-a-date"}]
+    assert fetch_cutoff(empty_stamp, NOW) == CUTOFF
 
 
 def test_fetcher_funnel_counts_a16z_announcements_in_window_only() -> None:
@@ -617,7 +679,9 @@ def test_build_why_slack_payloads_layout() -> None:
     contexts = [b["elements"][0]["text"] for b in blocks if b["type"] == "context"]
     assert "⚠️ *ben-evans* fetch failed: no essay cards found" in contexts[0]
     assert "⚠️ Not summarised: <https://x/Broken|Broken> — non-JSON output" in contexts[0]
-    assert contexts[1] == "📡 *a16z*   25 fetched › 3 in window › 3 new › 3 summarised"
+    assert contexts[1] == (
+        "📡 *<https://www.a16z.news/|a16z>*   25 fetched › 3 in window › 3 new › 3 summarised"
+    )
     assert "Tokens: 1234/24000 | Budget: OK" in contexts[2]
 
 
