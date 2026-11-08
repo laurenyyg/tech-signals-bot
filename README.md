@@ -62,15 +62,16 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 ### `--profile why` — Why does it matter?
 
-**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (articles + podcast transcripts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (announcements excluded: `Fundraise`-tagged posts, "Investing in / Welcome / Meet the / Announcing / Introducing …" titles, and titles mentioning a16z), One Useful Thing (Ethan Mollick).
+**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (full-text articles; podcast entries carry only a short episode description, not a transcript), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (announcements excluded: `Fundraise`-tagged posts, "Investing in / Welcome / Meet the / Announcing / Introducing …" titles, and titles mentioning a16z), One Useful Thing (Ethan Mollick).
 
 **Pre-LLM pipeline**:
 1. Fetch all sources → raw items. A source that errors, returns nothing, or whose entries all fail to parse is reported as a ⚠️ line in the digest instead of being silently skipped.
-2. Drop items outside an 8-day rolling window (one day of slack for late scheduled runs). Items without a parsable date are skipped. DeepLearning.AI date-only timestamps (no time component) are given a +1 day buffer so articles published on the exact cutoff day aren't inadvertently dropped.
+2. Drop items outside an 8-day rolling window (one day of slack for late scheduled runs). Items without a parsable date are skipped. Date-only values (e.g. DeepLearning.AI's `Nov 6, 2026`) count as the whole day, so items published on the cutoff day aren't dropped.
 3. Stratechery deduplication: articles win over podcasts on same title
 4. Drop items already posted in a previous week (`data/why_seen.json`). This lets the 8-day window overlap the weekly cadence, and lets month-only dates ("Nov 2026") stay in window all month, without repeats. The ledger is updated only after a successful Slack post and committed by the workflow; Stratechery access tokens are stripped from its keys.
+5. Fetch full article text for sources whose feeds only give excerpts (a16z, Ben Evans, DeepLearning.AI). Stratechery and One Useful Thing already carry full text in RSS and are never fetched.
 
-**LLM calls**: One Sonnet call per item (8,000 output tokens each) with title, author, content type, and text (truncated to 1500 chars). Claude returns only the summary bullets and `is_deep_read`; metadata comes from the fetcher. An item that fails is listed as "Not summarised" and the rest of the digest still posts.
+**LLM calls**: One Sonnet call per item (8,000 output tokens each) with title, author, content type, and text (truncated to 12,000 chars). Claude returns only the summary bullets and `is_deep_read`; metadata comes from the fetcher. An item that fails is listed as "Not summarised" and the rest of the digest still posts.
 
 **Slack format**:
 
@@ -80,6 +81,13 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 | 🧠 | Standard essay |
 | 🗂 | Presentation |
 | 🎙 | Podcast |
+
+Each digest ends with ⚠️ lines for failed sources and unsummarised items, a funnel line per feed, and the FinOps footer:
+
+```
+📡 a16z   25 fetched › 7 in window › 2 new › 2 summarised  (5 announcements skipped)
+📡 stratechery   50 fetched › 2 in window › 0 new › 0 summarised  (2 already posted)
+```
 
 **Schedule**: Fridays at 4:37 PM Vancouver time.
 
@@ -92,6 +100,12 @@ A decoupled two-stage pipeline designed around the **Daily Catcher / Weekly Synt
 **Sources**: ChatPRD "How I AI" — each new episode's linked workflow pages, parsed from their schema.org `HowTo` JSON-LD (one backlog item per workflow); SSPAI (RSS, filtered by author whitelist and keywords; Latin keywords like `AI` match whole words only). For each new item the catcher downloads the page and stores the extracted article text, so the LLM reads the full piece rather than the feed blurb.
 
 **Schedule**: Catcher runs daily at 11:03 UTC. Synthesizer runs Saturdays at 9:27 AM PDT.
+
+---
+
+## Long digests (all profiles)
+
+Slack caps a message at 50 blocks and each text block at 3,000 characters. Every profile builds its digest as a list of cards and hands it to `split_into_messages()` in `common.py`: a card is never split, but a long digest continues in further messages marked `(1/N)`, `(2/N)`, …, with the funnel and FinOps footer on the last one. If a later message fails to post, ledgers and backlogs are left unchanged, so the next run may re-post the earlier parts.
 
 ---
 
@@ -132,7 +146,7 @@ Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens, ONE ba
 _Model: claude-haiku-4-5-20251001 + claude-sonnet-4-6 | Tokens: 16934/21120 | Budget: OK_
 ```
 
-The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. The footer lists only the models actually called. Digests with more than 20 cards are split across several Slack messages to stay under Slack's 50-block limit.
+The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. The footer lists only the models actually called.
 
 ---
 

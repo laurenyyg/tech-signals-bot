@@ -321,13 +321,13 @@ def test_payload_splits_across_messages_under_block_limit() -> None:
     signals = [_signal(f"s{i}") for i in range(45)]
     funnel = {"ChatPRD": {"caught": 45, "passed": 45, "workflows": 45}}
     payloads = build_how_slack_payloads(signals, funnel, total_tokens=1, budget_status="OK")
-    assert len(payloads) == 3
+    assert len(payloads) == 2
     assert all(len(p["blocks"]) <= 50 for p in payloads)
-    assert "(1/3)" in payloads[0]["text"] and "(3/3)" in payloads[2]["text"]
+    assert "(1/2)" in payloads[0]["text"] and "(2/2)" in payloads[1]["text"]
     cards = sum(1 for p in payloads for b in p["blocks"] if b["type"] == "section")
     assert cards == 45
     assert "Model:" not in _all_text(payloads[0]) and "45 caught" not in _all_text(payloads[0])
-    assert "Model:" in _all_text(payloads[2]) and "45 caught" in _all_text(payloads[2])
+    assert "Model:" in _all_text(payloads[1]) and "45 caught" in _all_text(payloads[1])
 
 
 def test_payload_empty_backlog_message() -> None:

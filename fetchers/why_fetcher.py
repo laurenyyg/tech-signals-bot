@@ -28,6 +28,17 @@ A16Z_ARCHIVE_URL = "https://www.a16z.news/api/v1/archive?sort=new&limit=25"
 
 ONE_USEFUL_THING_URL = "https://www.oneusefulthing.org/feed"
 
+# Funnel rows, in display order. Stratechery and Ben Evans each split into two feeds.
+FEEDS: Tuple[str, ...] = (
+    "stratechery",
+    "stratechery-podcasts",
+    "deeplearning-ai",
+    "ben-evans-essays",
+    "ben-evans-presentations",
+    "a16z",
+    "one-useful-thing",
+)
+
 Item = Dict[str, Any]
 
 # Day-first ("3 September 2026") is Ben Evans's current format; month-first is legacy.
@@ -180,12 +191,15 @@ def parse_rss_feed(
     source: str,
     author: str,
     content_type: str,
+    stats: Optional[Dict[str, int]] = None,
 ) -> List[Item]:
     """Convert a feedparser result into items published on/after cutoff."""
     entries = list(getattr(feed, "entries", []) or [])
     if not entries:
         reason = getattr(feed, "bozo_exception", None)
         raise ValueError(f"feed returned no entries{f' ({reason})' if reason else ''}")
+    if stats is not None:
+        stats["fetched"] = len(entries)
 
     def parse_one(entry: Any) -> Optional[Item]:
         published = _require_date(_entry_date(entry), getattr(entry, "published", ""))
@@ -213,29 +227,47 @@ def parse_rss_feed(
     return parse_entries(entries, parse_one, source)
 
 
-def parse_deeplearning_ai_page(html: str, cutoff: datetime) -> List[Item]:
+def _deeplearning_ai_date(article: Any) -> Tuple[datetime, datetime]:
+    """(published, window end) from <time datetime> (legacy) or the footer's 'November 6, 2026'."""
+    time_tag = article.find("time")
+    if time_tag and time_tag.get("datetime"):
+        raw: str = time_tag["datetime"]
+        published = _require_date(parse_iso_date(raw), raw)
+        # Date-only values parse as midnight; treat them as covering the whole day.
+        if (published.hour, published.minute, published.second) == (0, 0, 0):
+            return published, published + timedelta(days=1)
+        return published, published
+    footer = article.find("footer")
+    span = footer.find("span") if footer else None
+    raw = span.get_text(strip=True) if span else ""
+    published, end, _ = _require_range(raw)
+    return published, end
+
+
+def parse_deeplearning_ai_page(
+    html: str, cutoff: datetime, stats: Optional[Dict[str, int]] = None
+) -> List[Item]:
     soup = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer("article"))
     articles = soup.find_all("article")
     if not articles:
         raise ValueError("no <article> cards found (page layout changed?)")
     logger.info(f"Scraped {len(articles)} article cards from deeplearning-ai")
+    if stats is not None:
+        stats["fetched"] = len(articles)
 
     def parse_one(article: Any) -> Optional[Item]:
-        h2 = article.find("h2")
-        title: str = h2.get_text(strip=True) if h2 else ""
+        heading = article.find(["h2", "h3"])
+        title: str = heading.get_text(strip=True) if heading else ""
         if not title:
+            raise ValueError("card has no h2/h3 title")
+        published, end = _deeplearning_ai_date(article)
+        if end <= cutoff:
             return None
-        time_tag = article.find("time")
-        raw_date: str = (time_tag.get("datetime") or "") if time_tag else ""
-        published = _require_date(parse_iso_date(raw_date), raw_date)
-        # Date-only values parse as midnight; add 1 day so articles published on
-        # the cutoff day aren't dropped.
-        if (published.hour, published.minute, published.second) == (0, 0, 0):
-            published += timedelta(days=1)
-        if published < cutoff:
-            return None
-        excerpt_div = article.find("div", class_=lambda c: c and "line-clamp" in c)
-        a_tag = article.find("a", href=True)
+        excerpt_div = article.find(class_=lambda c: c and "line-clamp" in c)
+        # The first link is often the "Letters" tag badge; the card link is the other one.
+        a_tag = next(
+            (a for a in article.find_all("a", href=True) if "/tag/" not in a["href"]), None
+        )
         href: str = a_tag["href"] if a_tag else ""
         return _make_item(
             title,
@@ -250,7 +282,12 @@ def parse_deeplearning_ai_page(html: str, cutoff: datetime) -> List[Item]:
     return parse_entries(articles, parse_one, "deeplearning-ai")
 
 
-def parse_ben_evans_page(html: str, cutoff: datetime) -> Tuple[List[Item], List[Item]]:
+def parse_ben_evans_page(
+    html: str,
+    cutoff: datetime,
+    essay_stats: Optional[Dict[str, int]] = None,
+    presentation_stats: Optional[Dict[str, int]] = None,
+) -> Tuple[List[Item], List[Item]]:
     """Return (essays, presentations) from the ben-evans.com homepage."""
     soup = BeautifulSoup(
         html, "html.parser",
@@ -262,11 +299,16 @@ def parse_ben_evans_page(html: str, cutoff: datetime) -> Tuple[List[Item], List[
     if not cards:
         raise ValueError("no essay cards found (page layout changed?)")
     logger.info(f"Scraped {len(cards)} essay cards from ben-evans")
+    blocks = soup.find_all("div", class_="PageRight")
+    if essay_stats is not None:
+        essay_stats["fetched"] = len(cards)
+    if presentation_stats is not None:
+        presentation_stats["fetched"] = len(blocks)
 
     def parse_essay(card: Any) -> Optional[Item]:
         title_a = card.find("a", class_="summary-title-link")
-        if not title_a:
-            return None
+        if not title_a or not title_a.get_text(strip=True):
+            raise ValueError("essay card has no title link")
         date_tag = card.find(class_="summary-metadata-item--date")
         raw_date: str = date_tag.get_text(strip=True) if date_tag else ""
         published, end, month_only = _require_range(raw_date)
@@ -313,12 +355,13 @@ def parse_ben_evans_page(html: str, cutoff: datetime) -> Tuple[List[Item], List[
         )
 
     essays = parse_entries(cards, parse_essay, "ben-evans-essays")
-    blocks = soup.find_all("div", class_="PageRight")
     presentations = parse_entries(blocks, parse_presentation, "ben-evans-presentations")
     return essays, presentations
 
 
-def parse_a16z_archive(payload: Any, cutoff: datetime) -> List[Item]:
+def parse_a16z_archive(
+    payload: Any, cutoff: datetime, stats: Optional[Dict[str, int]] = None
+) -> List[Item]:
     """Parse the a16z archive API: {"posts": [...], "nextCursor": ...} (or a bare list)."""
     if isinstance(payload, dict):
         posts = payload.get("posts")
@@ -332,20 +375,23 @@ def parse_a16z_archive(payload: Any, cutoff: datetime) -> List[Item]:
     if not posts:
         raise ValueError("archive returned no posts")
     logger.info(f"Fetched {len(posts)} posts from a16z archive")
+    filtered = 0
 
     def parse_one(post: Any) -> Optional[Item]:
+        nonlocal filtered
         if not isinstance(post, dict):
             raise ValueError(f"post is {type(post).__name__}, expected object")
         title: str = post.get("title", "") or ""
         if not title:
+            raise ValueError("post has no title")
+        raw_date: str = post.get("post_date", "") or ""
+        published = _require_date(parse_iso_date(raw_date), raw_date)
+        if published < cutoff:
             return None
         skip_reason = a16z_skip_reason(post)
         if skip_reason:
             logger.info(f"a16z: skipping {title!r} ({skip_reason})")
-            return None
-        raw_date: str = post.get("post_date", "") or ""
-        published = _require_date(parse_iso_date(raw_date), raw_date)
-        if published < cutoff:
+            filtered += 1
             return None
         bylines = post.get("publishedBylines") or []
         first = bylines[0] if bylines and isinstance(bylines[0], dict) else {}
@@ -360,7 +406,11 @@ def parse_a16z_archive(payload: Any, cutoff: datetime) -> List[Item]:
             published,
         )
 
-    return parse_entries(posts, parse_one, "a16z")
+    items = parse_entries(posts, parse_one, "a16z")
+    if stats is not None:
+        stats["fetched"] = len(posts)
+        stats["filtered"] = filtered
+    return items
 
 
 def dedupe_podcasts(articles: List[Item], podcasts: List[Item]) -> List[Item]:
@@ -374,18 +424,15 @@ def dedupe_podcasts(articles: List[Item], podcasts: List[Item]) -> List[Item]:
 # ---------------------------------------------------------------------------
 
 class WhyFetcher(BaseFetcher):
-    """Fetches Why-profile items. Per-source failures land in source_errors."""
+    """Fetches Why-profile items.
+
+    funnel[feed] holds fetched / in_window / filtered counts (plus fetch_failed);
+    source_errors[source] holds the error for each source that failed. Every item
+    gets a "feed" key matching its funnel entry.
+    """
 
     def __init__(self) -> None:
-        self.source_counts: Dict[str, int] = {
-            "stratechery": 0,
-            "stratechery-podcasts": 0,
-            "deeplearning-ai": 0,
-            "ben-evans-essays": 0,
-            "ben-evans-presentations": 0,
-            "a16z": 0,
-            "one-useful-thing": 0,
-        }
+        self.funnel: Dict[str, Dict[str, int]] = {feed: {} for feed in FEEDS}
         self.source_errors: Dict[str, str] = {}
         self._proxies = proxies_from_env()
         self._proxy_handler = (
@@ -394,34 +441,41 @@ class WhyFetcher(BaseFetcher):
 
     def fetch(self) -> List[Item]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
+        f = self.funnel
 
-        articles = self._guarded("stratechery", lambda: self._fetch_rss(
+        articles = self._guarded("stratechery", ["stratechery"], lambda: self._fetch_rss(
             os.getenv("STRATECHERY_RSS_URL"), "STRATECHERY_RSS_URL",
-            cutoff, "stratechery", "Ben Thompson", "essay",
+            cutoff, "stratechery", "Ben Thompson", "essay", f["stratechery"],
         ))
-        podcasts = self._guarded("stratechery-podcasts", lambda: self._fetch_rss(
+        podcasts = self._guarded("stratechery-podcasts", ["stratechery-podcasts"], lambda: self._fetch_rss(
             os.getenv("STRATECHERY_PODCAST_URL"), "STRATECHERY_PODCAST_URL",
-            cutoff, "stratechery", "Ben Thompson", "podcast",
+            cutoff, "stratechery", "Ben Thompson", "podcast", f["stratechery-podcasts"],
         ))
-        podcasts = dedupe_podcasts(articles, podcasts)
-        deeplearning = self._guarded("deeplearning-ai", lambda: parse_deeplearning_ai_page(
-            self._get(DEEPLEARNING_AI_URL).text, cutoff,
+        deduped = dedupe_podcasts(articles, podcasts)
+        f["stratechery-podcasts"]["filtered"] = len(podcasts) - len(deduped)
+        deeplearning = self._guarded("deeplearning-ai", ["deeplearning-ai"], lambda: parse_deeplearning_ai_page(
+            self._get(DEEPLEARNING_AI_URL).text, cutoff, f["deeplearning-ai"],
         ))
         essays, presentations = self._guarded(
             "ben-evans",
-            lambda: parse_ben_evans_page(self._get(BEN_EVANS_URL).text, cutoff),
+            ["ben-evans-essays", "ben-evans-presentations"],
+            lambda: parse_ben_evans_page(
+                self._get(BEN_EVANS_URL).text, cutoff,
+                f["ben-evans-essays"], f["ben-evans-presentations"],
+            ),
             default=([], []),
         )
-        a16z = self._guarded("a16z", lambda: parse_a16z_archive(
-            self._get(A16Z_ARCHIVE_URL).json(), cutoff,
+        a16z = self._guarded("a16z", ["a16z"], lambda: parse_a16z_archive(
+            self._get(A16Z_ARCHIVE_URL).json(), cutoff, f["a16z"],
         ))
-        one_useful_thing = self._guarded("one-useful-thing", lambda: self._fetch_rss(
+        one_useful_thing = self._guarded("one-useful-thing", ["one-useful-thing"], lambda: self._fetch_rss(
             ONE_USEFUL_THING_URL, None, cutoff, "one-useful-thing", "Ethan Mollick", "essay",
+            f["one-useful-thing"],
         ))
 
-        by_source = {
+        by_feed = {
             "stratechery": articles,
-            "stratechery-podcasts": podcasts,
+            "stratechery-podcasts": deduped,
             "deeplearning-ai": deeplearning,
             "ben-evans-essays": essays,
             "ben-evans-presentations": presentations,
@@ -429,10 +483,12 @@ class WhyFetcher(BaseFetcher):
             "one-useful-thing": one_useful_thing,
         }
         items: List[Item] = []
-        for key, source_items in by_source.items():
-            self.source_counts[key] = len(source_items)
-            items.extend(source_items)
-            logger.info(f"{key}: {len(source_items)} item(s) in window")
+        for feed, feed_items in by_feed.items():
+            f[feed]["in_window"] = len(feed_items) + f[feed].get("filtered", 0)
+            for item in feed_items:
+                item["feed"] = feed
+            items.extend(feed_items)
+            logger.info(f"{feed}: {len(feed_items)} item(s) in window")
 
         logger.info(
             f"WhyFetcher: {len(items)} items in the last {DAYS_FILTER} days; "
@@ -440,12 +496,16 @@ class WhyFetcher(BaseFetcher):
         )
         return items
 
-    def _guarded(self, key: str, fn: Callable[[], Any], default: Any = None) -> Any:
+    def _guarded(
+        self, source: str, feeds: List[str], fn: Callable[[], Any], default: Any = None
+    ) -> Any:
         try:
             return fn()
         except Exception as e:
-            logger.error(f"Error fetching {key}: {e}")
-            self.source_errors[key] = str(e)
+            logger.error(f"Error fetching {source}: {e}")
+            self.source_errors[source] = str(e)
+            for feed in feeds:
+                self.funnel[feed]["fetch_failed"] = 1
             return [] if default is None else default
 
     def _get(self, url: str) -> requests.Response:
@@ -463,6 +523,7 @@ class WhyFetcher(BaseFetcher):
         source: str,
         author: str,
         content_type: str,
+        stats: Dict[str, int],
     ) -> List[Item]:
         if not url:
             raise EnvironmentError(f"{env_name} is not set")
@@ -472,4 +533,4 @@ class WhyFetcher(BaseFetcher):
             handlers=[self._proxy_handler] if self._proxy_handler else [],
         )
         logger.info(f"Fetched {len(feed.entries)} entries from {source} ({content_type}) RSS")
-        return parse_rss_feed(feed, cutoff, source, author, content_type)
+        return parse_rss_feed(feed, cutoff, source, author, content_type, stats)

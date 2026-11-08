@@ -2,8 +2,9 @@
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import anthropic
 import requests
@@ -154,15 +155,14 @@ def build_footer(
 
 
 def build_error_payload(error_msg: str, footer: str) -> Dict[str, Any]:
+    prefix, suffix = "🚨 *Alert: Pipeline Failed*\n```", "```"
+    error_msg = fit_text(error_msg, SLACK_TEXT_MAX_CHARS - len(prefix) - len(suffix))
     return {
         "text": "🚨 Tech Signals Bot — Pipeline Error",
         "blocks": [
             {
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"🚨 *Alert: Pipeline Failed*\n```{error_msg}```",
-                },
+                "text": {"type": "mrkdwn", "text": f"{prefix}{error_msg}{suffix}"},
             },
             {
                 "type": "context",
@@ -179,3 +179,125 @@ def post_to_slack(webhook_url: str, payload: Dict[str, Any]) -> None:
             f"Slack webhook returned {response.status_code}: {response.text}"
         )
     logger.info("Slack post successful")
+
+
+# ---------------------------------------------------------------------------
+# Slack message splitting (shared by every profile)
+# ---------------------------------------------------------------------------
+
+Block = Dict[str, Any]
+
+SLACK_MAX_BLOCKS = 50
+SLACK_TEXT_MAX_CHARS = 3000  # section text and each context element
+SLACK_HEADER_MAX_CHARS = 150
+SLACK_CONTEXT_MAX_ELEMENTS = 10
+# Sum of block text per message; a safety margin well under Slack's message limits.
+SLACK_MESSAGE_MAX_CHARS = 30000
+# Incoming webhooks allow about one message per second.
+SLACK_POST_PAUSE_SECONDS = 1.0
+
+
+def fit_text(text: str, limit: int = SLACK_TEXT_MAX_CHARS) -> str:
+    """Truncate text to at most limit chars, ending with an ellipsis when cut."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def section_block(text: str) -> Block:
+    return {"type": "section", "text": {"type": "mrkdwn", "text": fit_text(text)}}
+
+
+def context_blocks(lines: List[str]) -> List[Block]:
+    """Pack lines into context blocks without exceeding per-element or per-block limits.
+
+    Lines are joined with newlines into elements of at most SLACK_TEXT_MAX_CHARS;
+    a single over-long line is truncated.
+    """
+    elements: List[str] = []
+    for line in (fit_text(l) for l in lines):
+        if elements and len(elements[-1]) + 1 + len(line) <= SLACK_TEXT_MAX_CHARS:
+            elements[-1] += "\n" + line
+        else:
+            elements.append(line)
+    return [
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": e}
+                for e in elements[i : i + SLACK_CONTEXT_MAX_ELEMENTS]
+            ],
+        }
+        for i in range(0, len(elements), SLACK_CONTEXT_MAX_ELEMENTS)
+    ]
+
+
+def _block_chars(block: Block) -> int:
+    text = block.get("text")
+    total = len(text.get("text", "")) if isinstance(text, dict) else 0
+    for element in block.get("elements", []) or []:
+        if isinstance(element, dict):
+            total += len(str(element.get("text", "")))
+    return total
+
+
+def split_into_messages(
+    title: str,
+    groups: List[List[Block]],
+    tail: List[Block],
+    max_blocks: int = SLACK_MAX_BLOCKS,
+    max_chars: int = SLACK_MESSAGE_MAX_CHARS,
+) -> List[Dict[str, Any]]:
+    """Lay out a digest as one or more Slack messages.
+
+    Each message starts with a header (title, plus "(i/N)" when there are several)
+    and a divider. A group (e.g. a card and its divider) is never split across
+    messages, and no block is ever split. The tail (warnings, funnel, footer) goes
+    on the last message, or on a message of its own if it doesn't fit there.
+    """
+    overhead = 2  # header + divider
+
+    def fits(chunk: List[Block], extra: List[Block]) -> bool:
+        blocks = chunk + extra
+        return (
+            overhead + len(blocks) <= max_blocks
+            and sum(_block_chars(b) for b in blocks) <= max_chars
+        )
+
+    chunks: List[List[Block]] = [[]]
+    for group in groups:
+        if not fits([], group):
+            raise ValueError(f"a block group of {len(group)} blocks cannot fit in one message")
+        if not fits(chunks[-1], group):
+            chunks.append([])
+        chunks[-1].extend(group)
+    if not fits(chunks[-1], tail):
+        chunks.append([])
+    chunks[-1].extend(tail)
+
+    payloads: List[Dict[str, Any]] = []
+    for index, chunk in enumerate(chunks, 1):
+        suffix = f" ({index}/{len(chunks)})" if len(chunks) > 1 else ""
+        header = fit_text(title, SLACK_HEADER_MAX_CHARS - len(suffix)) + suffix
+        payloads.append({
+            "text": header,
+            "blocks": [
+                {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
+                {"type": "divider"},
+                *chunk,
+            ],
+        })
+    return payloads
+
+
+def post_payloads(
+    webhook_url: str,
+    payloads: List[Dict[str, Any]],
+    post: Callable[[str, Dict[str, Any]], None] = post_to_slack,
+) -> None:
+    """Post messages in order; raises on the first failure (later ones are not sent).
+
+    Callers pass their module's post_to_slack so tests can patch it there.
+    """
+    for index, payload in enumerate(payloads):
+        if index:
+            time.sleep(SLACK_POST_PAUSE_SECONDS)
+        post(webhook_url, payload)
