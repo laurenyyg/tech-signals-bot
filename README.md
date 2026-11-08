@@ -89,7 +89,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 A decoupled two-stage pipeline designed around the **Daily Catcher / Weekly Synthesizer** pattern (see below).
 
-**Sources**: ChatPRD "How I AI" page (`PodcastSeries` JSON-LD), SSPAI (RSS, filtered by author whitelist and keywords; Latin keywords like `AI` match whole words only). For each new item the catcher downloads the page and stores the extracted article text, so the LLM reads the full piece rather than the feed blurb.
+**Sources**: ChatPRD "How I AI" — each new episode's linked workflow pages, parsed from their schema.org `HowTo` JSON-LD (one backlog item per workflow); SSPAI (RSS, filtered by author whitelist and keywords; Latin keywords like `AI` match whole words only). For each new item the catcher downloads the page and stores the extracted article text, so the LLM reads the full piece rather than the feed blurb.
 
 **Schedule**: Catcher runs daily at 11:03 UTC. Synthesizer runs Saturdays at 9:27 AM PDT.
 

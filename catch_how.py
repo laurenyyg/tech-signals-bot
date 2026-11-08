@@ -1,7 +1,8 @@
 """Catcher script for the How pipeline.
 
 Fetches new items from ChatPRD and SSPAI, downloads and extracts each new
-article's body, and appends them to the persistent JSON backlog. No LLM calls.
+article's body (unless the fetcher already supplied one, as ChatPRD workflow
+items do), and appends them to the persistent JSON backlog. No LLM calls.
 
 Usage:
     venv/bin/python catch_how.py            # default HOW_DAYS_FILTER window
@@ -87,7 +88,8 @@ def main() -> None:
             link = item.get("link", "")
             if not link or link in known:
                 continue
-            item["body"] = fetch_body(link, HOW_BODY_MAX_CHARS)
+            if not item.get("body"):
+                item["body"] = fetch_body(link, HOW_BODY_MAX_CHARS)
             if not item["body"]:
                 logger.warning(f"[Catcher] no body extracted for {link}; synthesizer will retry")
             backlog.append(item)

@@ -6,7 +6,11 @@ from typing import Any, Dict, List
 
 import pytest
 
-from fetchers.chatprd_fetcher import parse_chatprd_page
+from fetchers.chatprd_fetcher import (
+    extract_workflow_links,
+    parse_chatprd_page,
+    parse_howto_page,
+)
 from fetchers.sspai_fetcher import parse_sspai_feed, passes_how_filter
 from how_pipeline import (
     build_how_slack_payload,
@@ -94,6 +98,59 @@ def test_chatprd_raises_when_structure_missing() -> None:
         parse_chatprd_page(_ld_page({"@type": "BreadcrumbList"}), CUTOFF)
     with pytest.raises(RuntimeError):
         parse_chatprd_page("<html><body>no json-ld</body></html>", CUTOFF)
+
+
+EPISODE_PAGE = """
+<html><body>
+<a href="/how-i-ai/workflows">All workflows</a>
+<a href="/how-i-ai/workflows/automate-bug-bashing">Automate Bug Bashing</a>
+<a href="https://www.chatprd.ai/how-i-ai/workflows/growth-loop/">Growth Loop</a>
+<a href="/how-i-ai/workflows/automate-bug-bashing">duplicate link</a>
+<a href="/how-i-ai/some-other-episode">Another episode</a>
+</body></html>
+"""
+
+
+def test_extract_workflow_links_dedupes_and_skips_index() -> None:
+    assert extract_workflow_links(EPISODE_PAGE) == [
+        "https://www.chatprd.ai/how-i-ai/workflows/automate-bug-bashing",
+        "https://www.chatprd.ai/how-i-ai/workflows/growth-loop",
+    ]
+
+
+HOWTO_PAGE = _ld_page(
+    {"@type": "BreadcrumbList"},
+    {
+        "@type": "HowTo",
+        "name": "Automate Software Bug Bashing with a Browser Agent",
+        "description": "Use a browser agent to follow a test plan.",
+        "datePublished": "2026-10-29T21:24:56.155Z",
+        "tool": [{"@type": "HowToTool", "name": "Codex"}, {"@type": "HowToTool", "name": "FigJam"}],
+        "supply": [{"@type": "HowToSupply", "name": "A detailed test plan."}],
+        "yield": "A FigJam board of bug comments.",
+        "step": [
+            {"@type": "HowToStep", "name": "Create a Test Plan", "text": "Document exact steps."},
+            {"@type": "HowToStep", "text": "Run the agent."},
+        ],
+    },
+)
+
+
+def test_parse_howto_page_renders_body() -> None:
+    parsed = parse_howto_page(HOWTO_PAGE)
+    assert parsed is not None
+    assert parsed["title"] == "Automate Software Bug Bashing with a Browser Agent"
+    assert parsed["published"] == "2026-10-29T21:24:56.155Z"
+    body = parsed["body"]
+    assert "Tools: Codex, FigJam" in body
+    assert "- A detailed test plan." in body
+    assert "1. Create a Test Plan: Document exact steps." in body
+    assert "2. Run the agent." in body
+    assert "Outcome: A FigJam board of bug comments." in body
+
+
+def test_parse_howto_page_missing_returns_none() -> None:
+    assert parse_howto_page(_ld_page({"@type": "BreadcrumbList"})) is None
 
 
 # ---------------------------------------------------------------------------
