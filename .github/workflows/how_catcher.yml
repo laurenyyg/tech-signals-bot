@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "3 11 * * *" 
   workflow_dispatch:
+    inputs:
+      days:
+        description: "Fetch window in days (blank = default 3; use e.g. 14 to backfill)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -27,7 +32,8 @@ jobs:
         env:
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
           HOW_WEBHOOK_URL: ${{ secrets.HOW_WEBHOOK_URL }}
-        run: python catch_how.py
+          DAYS: ${{ inputs.days }}
+        run: python catch_how.py ${DAYS:+--days "$DAYS"}
 
       - name: Commit and push backlog
         run: |

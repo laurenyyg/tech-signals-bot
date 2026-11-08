@@ -153,7 +153,7 @@ The backlog is a plain JSON file committed to the repo by the catcher workflow. 
 
 The **seen ledger** (`data/how_seen.json`) stops articles from re-entering the backlog after the weekly reset (the 3-day fetch window overlaps the reset). Entries older than 60 days are pruned on every write, so the file stays small.
 
-For a one-off backfill (e.g. after an outage), run `venv/bin/python catch_how.py --days 14`.
+For a one-off backfill (e.g. after an outage), run `venv/bin/python catch_how.py --days 14`, or trigger the **How Pipeline - Daily Catcher** workflow manually with `days` set to `14`.
 
 ---
 
