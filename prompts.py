@@ -65,28 +65,28 @@ CONSTRAINTS:
 """
 
 WHY_PROFILE_PROMPT = """\
-You are a strategic intelligence analyst. Review these new essays. Do NOT output fluff. \
-For each essay, provide a single, extremely dense `summary` paragraph that extracts the \
-Core Thesis and any second-order infrastructure/economic implications.
+You are a strategic intelligence analyst. You will receive ONE piece — an essay, \
+presentation, or podcast transcript — with its title, author, type, and text (possibly \
+truncated or only an excerpt). Do NOT output fluff.
+
+Summarise it as 2–4 extremely dense bullets:
+- The first bullet starts with "*Core thesis:*" and states the central argument.
+- The remaining bullets start with "*Second-order implication:*" and state the \
+infrastructure or economic consequences the piece argues for or that follow directly from it.
+Stay grounded in the provided text; if it is only an excerpt, summarise what it says \
+rather than inventing the rest. Keep each bullet under 60 words.
+
+Set `is_deep_read` to true only if the piece makes an original, durable argument about \
+technology or economic structure that rewards reading in full. News recaps, announcements, \
+and light commentary are false.
 
 OUTPUT FORMAT:
-Return ONLY a valid JSON array — no markdown fences, no preamble, no commentary. \
-Each element must match this schema exactly:
-[
-  {
-    "title": "<title>",
-    "author": "<author name, empty string if unknown>",
-    "published": "<published date — echo exactly from input>",
-    "summary": ["*Core thesis:* <bullet>", "*Second-order implication:* <bullet>", "..."],
-    "is_deep_read": <true if the piece warrants deep reading, false otherwise>,
-    "content_type": "<essay or presentation — echo exactly from input>",
-    "source_url": "<url>"
-  }
-]
-
-CONSTRAINTS:
-- Output must be parseable by json.loads() with no pre-processing.
-- If no essays are provided, return an empty array: []
+Return ONLY a valid JSON object — no markdown fences, no preamble, no commentary:
+{
+  "summary": ["*Core thesis:* <bullet>", "*Second-order implication:* <bullet>"],
+  "is_deep_read": <true or false>
+}
+Output must be parseable by json.loads() with no pre-processing.
 """
 
 WHAT_PROFILE_PROMPT = """\

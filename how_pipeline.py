@@ -5,11 +5,10 @@ drains it once a week and posts to Slack.
 """
 import json
 import logging
-import os
-import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import seen_ledger
 from common import (
     MAX_TOKENS,
     MODEL_ID,
@@ -17,10 +16,12 @@ from common import (
     call_claude_raw,
     fetch_body,
     post_to_slack,
+    strip_code_fences,
     strip_html,
 )
 from config import HOW_BODY_MAX_CHARS, HOW_SEEN_RETENTION_DAYS
 from prompts import HOW_BOUNCER_PROMPT, HOW_PROFILE_PROMPT
+from seen_ledger import load_json_list, mark_seen, save_json_list
 
 logger = logging.getLogger(__name__)
 
@@ -44,53 +45,12 @@ MAX_ATTEMPTS = 3
 # State: backlog + seen ledger
 # ---------------------------------------------------------------------------
 
-def load_json_list(path: str) -> List[Dict[str, Any]]:
-    """Load a JSON array file. Missing file → []. Malformed file raises."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return []
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"{path} is malformed JSON: {e}") from e
-    if not isinstance(data, list):
-        raise RuntimeError(f"{path} must contain a JSON array, got {type(data).__name__}")
-    return data
-
-
-def save_json_list(path: str, data: List[Dict[str, Any]]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-
-
 def prune_seen(
     seen: List[Dict[str, Any]],
     now: datetime,
     retention_days: int = HOW_SEEN_RETENTION_DAYS,
 ) -> List[Dict[str, Any]]:
-    """Drop ledger entries older than retention_days (and any unparsable ones)."""
-    cutoff = now - timedelta(days=retention_days)
-    kept: List[Dict[str, Any]] = []
-    for entry in seen:
-        try:
-            if entry.get("url") and datetime.fromisoformat(entry["processed_at"]) >= cutoff:
-                kept.append(entry)
-        except (KeyError, TypeError, ValueError):
-            continue
-    return kept
-
-
-def mark_seen(
-    seen: List[Dict[str, Any]], urls: List[str], now: datetime
-) -> List[Dict[str, Any]]:
-    """Return the ledger with urls appended (existing URLs are not duplicated)."""
-    known = {e.get("url") for e in seen}
-    stamp = now.isoformat()
-    return seen + [
-        {"url": u, "processed_at": stamp} for u in dict.fromkeys(urls) if u and u not in known
-    ]
+    return seen_ledger.prune_seen(seen, now, retention_days)
 
 
 def known_urls(backlog: List[Dict[str, Any]], seen: List[Dict[str, Any]]) -> Set[str]:
@@ -120,11 +80,6 @@ def parse_bouncer_verdict(text: str) -> Optional[str]:
     return stripped or None
 
 
-def _strip_code_fences(text: str) -> str:
-    match = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", text, re.S)
-    return match.group(1) if match else text
-
-
 def dedupe_tools(tools: List[Any]) -> List[str]:
     """Drop blanks and case-insensitive duplicates; fold "X MCP" into "X" when X is listed."""
     names = [str(t).strip() for t in tools if str(t).strip()]
@@ -150,7 +105,7 @@ def parse_sonnet_signals(
     duplicate source_ids are dropped.
     """
     try:
-        raw = json.loads(_strip_code_fences(text))
+        raw = json.loads(strip_code_fences(text))
     except json.JSONDecodeError as e:
         raise ValueError(
             f"Sonnet returned non-JSON output: {e}\nRaw (first 500 chars):\n{text[:500]}"
