@@ -3,6 +3,8 @@
 One call per item keeps a long week from exhausting a single output budget, and
 one bad response only drops that item. Title, author, date, type, and URL come
 from fetcher metadata; the LLM returns only the summary and the deep-read flag.
+a16z Charts of the Week posts (content_type "charts") skip the call: the digest
+shows the title and date only.
 
 data/why_seen.json records posted items so the overlapping fetch window (and
 month-only dates, which stay in window all month) never repeat an item.
@@ -134,6 +136,8 @@ def enrich_bodies(items: List[Item]) -> None:
     flagged excerpt_only.
     """
     for item in items:
+        if item.get("content_type") == "charts":
+            continue
         if item.get("source") not in WHY_BODY_FETCH_SOURCES:
             continue
         excerpt = strip_html(item.get("summary", "") or "")
@@ -192,6 +196,10 @@ def summarize_items(
 
     for index, item in enumerate(items, 1):
         label = f"[{index}/{len(items)}] {item.get('title', '')!r}"
+        if item.get("content_type") == "charts":
+            logger.info(f"{label}: charts roundup in window, skipping LLM")
+            signals.append({**item, "summary": [], "title_only": True})
+            continue
         try:
             text, t_in, t_out, stop = call_claude_raw(
                 model_id=MODEL_ID,
@@ -254,7 +262,10 @@ def build_funnel(
     for item in already_posted:
         bump(item, "already_posted")
     for signal in signals:
-        bump(signal, "summarised")
+        if signal.get("title_only"):
+            bump(signal, "title_only")
+        else:
+            bump(signal, "summarised")
     for item, _ in failures:
         bump(item, "failed")
     return funnel
@@ -280,6 +291,8 @@ def funnel_line(feed: str, counts: Dict[str, int]) -> str:
     notes: List[str] = []
     if counts.get("filtered"):
         notes.append(f"{counts['filtered']} {FILTERED_LABELS.get(feed, 'filtered')}")
+    if counts.get("title_only"):
+        notes.append(f"{counts['title_only']} title only")
     if counts.get("already_posted"):
         notes.append(f"{counts['already_posted']} already posted")
     if counts.get("failed"):
@@ -320,6 +333,8 @@ def funnel_lines(funnel: Dict[str, Dict[str, int]]) -> List[str]:
 
 def _prefix(signal: Item) -> str:
     content_type = signal.get("content_type", "essay")
+    if content_type == "charts":
+        return "📊"
     if content_type == "podcast":
         return "🎙"
     if content_type == "presentation":
@@ -329,7 +344,12 @@ def _prefix(signal: Item) -> str:
 
 def _signal_section(signal: Item) -> Block:
     content_type: str = signal.get("content_type", "essay")
-    header_line = f"{_prefix(signal)} *{signal.get('title', 'Untitled')}*"
+    title = signal.get("title", "Untitled")
+    link = signal.get("link") or ""
+    # Charts cards are title + date. The title is the link so the post stays reachable.
+    if signal.get("title_only") and link:
+        title = f"<{link}|{title}>"
+    header_line = f"{_prefix(signal)} *{title}*"
     source = signal.get("source", "")
     if source:
         header_line += f" — _{SOURCE_LABELS.get(source, source)}_"
@@ -340,6 +360,8 @@ def _signal_section(signal: Item) -> Block:
         pass
     if content_type == "presentation":
         header_line += "  `[Presentation]`"
+    if signal.get("title_only"):
+        return section_block(fit_text(header_line, SLACK_SECTION_MAX_CHARS))
 
     text = fit_text(
         "\n".join([header_line] + [f"• {b}" for b in signal.get("summary", [])]),
@@ -409,8 +431,9 @@ def run_why_pipeline(webhook_url: str, usage_meta: Dict[str, Any]) -> None:
 
     Raises if every LLM call fails (the caller posts a 🚨 alert). Source fetch
     failures and individual item failures are listed in the digest instead.
-    Only after every Slack message posts are the summarised items added to the
-    seen ledger; failed items stay eligible for next week's run. If a later
+    Only after every Slack message posts are the posted items (summaries and
+    in-window charts roundups) added to the seen ledger; failed items stay
+    eligible for next week's run. If a later
     message fails, the ledger is untouched, so earlier messages may be re-posted
     on retry.
     """

@@ -59,7 +59,7 @@ Session tracker for the Why pipeline rewrite. Update as items land.
 - [x] Fetch window stretches to last successful post − 1 day after a missed run (`fetch_cutoff`: floor 8, cap 30). Empty ledger still uses the 8-day floor
 - [x] Fold zero-activity feeds into one funnel line (`📡 quiet: … (N fetched, 0 in window)`); failed fetches stay on their own line
 - [ ] Parked polish: "Read letter" label for DeepLearning.AI
-- [x] a16z "Charts of the Week" roundups — **keep** (not in the skip lists)
+- [x] a16z "Charts of the Week" roundups — kept in the date window, not sent to the LLM; Slack shows title and date only
 
 
 

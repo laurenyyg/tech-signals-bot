@@ -30,6 +30,14 @@ A16Z_SKIP_TITLE_PREFIXES: List[str] = [
 ]
 A16Z_SKIP_TITLE_SUBSTRINGS: List[str] = ["a16z"]
 
+# Charts of the Week roundups (the older title is "This Week in Charts"). Same date
+# window as essays, but the pipeline lists title and date only — no body fetch, no LLM.
+A16Z_CHARTS_TAG: str = "Charts"
+A16Z_CHARTS_TITLE_PREFIXES: List[str] = [
+    "charts of the week",
+    "this week in charts",
+]
+
 # What profile: floor window (one day of slack for a late Sunday run). After a
 # missed week the window stretches to last ledger processed_at minus WHAT_DAYS_SLACK,
 # capped at WHAT_DAYS_MAX (one missed Sunday). Empty ledger uses the floor.

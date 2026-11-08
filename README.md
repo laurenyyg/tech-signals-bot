@@ -63,16 +63,16 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 
 ### `--profile why` — Why does it matter?
 
-**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (full-text articles; podcast entries carry only a short episode description, not a transcript), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (announcements excluded: `Fundraise`-tagged posts, "Investing in / Welcome / Meet the / Announcing / Introducing …" titles, and titles mentioning a16z), One Useful Thing (Ethan Mollick).
+**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (full-text articles; podcast entries carry only a short episode description, not a transcript), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (announcements excluded: `Fundraise`-tagged posts, "Investing in / Welcome / Meet the / Announcing / Introducing …" titles, and titles mentioning a16z; Charts of the Week stays, but only as a title and date), One Useful Thing (Ethan Mollick).
 
 **Pre-LLM pipeline**:
 1. Fetch all sources → raw items. A source that errors, returns nothing, or whose entries all fail to parse is reported as a ⚠️ line in the digest instead of being silently skipped.
 2. Drop items outside the fetch window. The floor is 8 days (one day of slack for late scheduled runs). After a missed run the window stretches back to the last successful post minus one day, capped at 30 days, so last week's items are recovered instead of ageing out. An empty ledger uses the 8-day floor. Items without a parsable date are skipped. Date-only values (e.g. DeepLearning.AI's `Nov 6, 2026`) count as the whole day, so items published on the cutoff day aren't dropped.
 3. Stratechery deduplication: articles win over podcasts on same title
 4. Drop items already posted in a previous week (`data/why_seen.json`). This lets the 8-day window overlap the weekly cadence, and lets month-only dates ("Nov 2026") stay in window all month, without repeats. The ledger is updated only after a successful Slack post and committed by the workflow; Stratechery access tokens are stripped from its keys.
-5. Fetch full article text for sources whose feeds only give excerpts (a16z, Ben Evans, DeepLearning.AI). Stratechery and One Useful Thing already carry full text in RSS and are never fetched.
+5. Fetch full article text for sources whose feeds only give excerpts (a16z, Ben Evans, DeepLearning.AI). Stratechery and One Useful Thing already carry full text in RSS and are never fetched. Charts of the Week is never fetched.
 
-**LLM calls**: One Sonnet call per item (8,000 output tokens each) with title, author, content type, and text (truncated to 12,000 chars). Claude returns only the summary bullets and `is_deep_read`; metadata comes from the fetcher. An item that fails is listed as "Not summarised" and the rest of the digest still posts.
+**LLM calls**: One Sonnet call per item (8,000 output tokens each) with title, author, content type, and text (truncated to 12,000 chars). Claude returns only the summary bullets and `is_deep_read`; metadata comes from the fetcher. An item that fails is listed as "Not summarised" and the rest of the digest still posts. Charts of the Week is not sent to the model.
 
 **Slack format**:
 
@@ -82,6 +82,7 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 | 🧠 | Standard essay |
 | 🗂 | Presentation |
 | 🎙 | Podcast |
+| 📊 | Charts of the Week (title and date only) |
 
 Each digest ends with ⚠️ lines for failed sources and unsummarised items, a funnel line per feed, and the FinOps footer:
 

@@ -3,14 +3,20 @@ import os
 import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import feedparser
 import requests
 from bs4 import BeautifulSoup, SoupStrainer
 
 from common import USER_AGENT, proxies_from_env
-from config import A16Z_SKIP_TAGS, A16Z_SKIP_TITLE_PREFIXES, A16Z_SKIP_TITLE_SUBSTRINGS
+from config import (
+    A16Z_CHARTS_TAG,
+    A16Z_CHARTS_TITLE_PREFIXES,
+    A16Z_SKIP_TAGS,
+    A16Z_SKIP_TITLE_PREFIXES,
+    A16Z_SKIP_TITLE_SUBSTRINGS,
+)
 from fetchers.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -79,12 +85,24 @@ def parse_human_date(date_str: str) -> Optional[datetime]:
     return parsed[0] if parsed else None
 
 
+def _a16z_tag_names(post: Dict[str, Any]) -> Set[str]:
+    return {
+        t.get("name") for t in (post.get("postTags") or []) if isinstance(t, dict)
+    }
+
+
+def a16z_is_charts(post: Dict[str, Any]) -> bool:
+    """Charts of the Week (tag `Charts`, or the current/legacy title prefix)."""
+    if A16Z_CHARTS_TAG in _a16z_tag_names(post):
+        return True
+    title = (post.get("title") or "").strip().lower()
+    return any(title.startswith(prefix) for prefix in A16Z_CHARTS_TITLE_PREFIXES)
+
+
 def a16z_skip_reason(post: Dict[str, Any]) -> Optional[str]:
     """Why an a16z post is an announcement rather than an essay (None = keep it)."""
     title = (post.get("title") or "").strip().lower()
-    tags = {
-        t.get("name") for t in (post.get("postTags") or []) if isinstance(t, dict)
-    }
+    tags = _a16z_tag_names(post)
     for tag in A16Z_SKIP_TAGS:
         if tag in tags:
             return f"tagged {tag}"
@@ -388,11 +406,14 @@ def parse_a16z_archive(
         published = _require_date(parse_iso_date(raw_date), raw_date)
         if published < cutoff:
             return None
-        skip_reason = a16z_skip_reason(post)
-        if skip_reason:
-            logger.info(f"a16z: skipping {title!r} ({skip_reason})")
-            filtered += 1
-            return None
+        # Charts roundups use the same window as essays. They are not announcements.
+        charts = a16z_is_charts(post)
+        if not charts:
+            skip_reason = a16z_skip_reason(post)
+            if skip_reason:
+                logger.info(f"a16z: skipping {title!r} ({skip_reason})")
+                filtered += 1
+                return None
         bylines = post.get("publishedBylines") or []
         first = bylines[0] if bylines and isinstance(bylines[0], dict) else {}
         summary: str = post.get("truncated_body_text") or post.get("description") or ""
@@ -402,7 +423,7 @@ def parse_a16z_archive(
             summary,
             post.get("canonical_url", "") or "",
             "a16z",
-            "essay",
+            "charts" if charts else "essay",
             published,
         )
 

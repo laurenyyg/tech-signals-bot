@@ -146,6 +146,41 @@ def test_a16z_archive_applies_skip_filter() -> None:
     assert [i["title"] for i in parse_a16z_archive(payload, CUTOFF)] == ["Real Essay"]
 
 
+def test_a16z_charts_in_window_are_title_only_items() -> None:
+    payload = {"posts": [
+        _a16z_post(
+            "Charts of the Week: Apple Skips Capex",
+            "2026-11-06T15:00:00Z",
+            postTags=[{"name": "Daily Newsletter"}, {"name": "Charts"}],
+        ),
+        _a16z_post(
+            "This Week in Charts: Agents Denied",
+            "2026-11-05T15:00:00Z",
+            postTags=[{"name": "Charts"}],
+        ),
+        _a16z_post(
+            "Charts of the Week: a16z Lookback",
+            "2026-11-04T15:00:00Z",
+            postTags=[{"name": "Charts"}],
+        ),
+        _a16z_post(
+            "Charts of the Week: Old",
+            "2026-10-01T15:00:00Z",
+            postTags=[{"name": "Charts"}],
+        ),
+        _a16z_post("Charts of the Week: Job FUD Fades", "2026-11-03T15:00:00Z"),
+        _a16z_post("Real Essay", "2026-11-06T15:00:00Z"),
+    ]}
+    items = parse_a16z_archive(payload, CUTOFF)
+    assert [(i["title"], i["content_type"]) for i in items] == [
+        ("Charts of the Week: Apple Skips Capex", "charts"),
+        ("This Week in Charts: Agents Denied", "charts"),
+        ("Charts of the Week: a16z Lookback", "charts"),
+        ("Charts of the Week: Job FUD Fades", "charts"),
+        ("Real Essay", "essay"),
+    ]
+
+
 def test_a16z_unexpected_shape_raises() -> None:
     with pytest.raises(ValueError, match="unexpected archive response shape"):
         parse_a16z_archive({"items": []}, CUTOFF)
@@ -363,6 +398,10 @@ def test_enrich_bodies_fetches_only_excerpt_sources(monkeypatch: pytest.MonkeyPa
         {"source": "deeplearning-ai", "link": "https://www.deeplearning.ai/down", "summary": "Dear friends"},
         {"source": "stratechery", "link": "https://stratechery.com/a/?access_token=x", "summary": "RSS body"},
         {"source": "one-useful-thing", "link": "https://www.oneusefulthing.org/p/a", "summary": "RSS body"},
+        {
+            "source": "a16z", "content_type": "charts",
+            "link": "https://www.a16z.news/p/charts-of-the-week", "summary": "Subtitle.",
+        },
     ]
     why_pipeline.enrich_bodies(items)
 
@@ -371,6 +410,7 @@ def test_enrich_bodies_fetches_only_excerpt_sources(monkeypatch: pytest.MonkeyPa
         "https://www.ben-evans.com/short",
         "https://www.deeplearning.ai/down",
     ]
+    assert items[-1]["summary"] == "Subtitle." and "excerpt_only" not in items[-1]
     assert items[0]["summary"].startswith("Full essay text.") and "excerpt_only" not in items[0]
     assert items[1]["summary"] == "A longer excerpt." and items[1]["excerpt_only"] is True
     assert items[2]["excerpt_only"] is True
@@ -428,6 +468,24 @@ def test_summarize_items_isolates_failures(monkeypatch: pytest.MonkeyPatch) -> N
     assert usage == {"total_tokens": 1200, "budget_status": "Hit", "max_tokens": 16000}
 
 
+def test_summarize_items_skips_charts(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: List[str] = []
+
+    def fake(model_id: str, system: str, user_message: str, max_tokens: int, use_thinking: bool = False):
+        called.append(user_message.splitlines()[0])
+        return '{"summary": ["x"], "is_deep_read": false}', 10, 20, "end_turn"
+
+    monkeypatch.setattr(why_pipeline, "call_claude_raw", fake)
+    charts = {**_item("Charts of the Week: Apple"), "content_type": "charts", "summary": "not for the model"}
+    signals, failures = summarize_items([charts, _item("good")], {})
+
+    assert called == ["Title: good"]
+    assert failures == []
+    assert signals[0]["title_only"] is True and signals[0]["summary"] == []
+    assert signals[0]["link"] == charts["link"]
+    assert signals[1]["title"] == "good" and signals[1]["summary"] == ["x"]
+
+
 def _fetcher_returning(
     items: List[Dict[str, Any]], source_errors: Optional[Dict[str, str]] = None
 ) -> Any:
@@ -477,6 +535,38 @@ def test_run_why_pipeline_stretches_cutoff_after_a_gap(
     why_pipeline.run_why_pipeline("https://hooks.example", {})
     assert captured == [NOW - timedelta(days=15)]
     assert "last 15 days" in _text(posted)
+
+
+def test_run_why_pipeline_charts_skip_llm_and_are_posted(
+    monkeypatch: pytest.MonkeyPatch, _isolated_seen_file: str
+) -> None:
+    charts = {
+        **_item("Charts of the Week: Apple Skips Capex"),
+        "content_type": "charts",
+        "link": "https://www.a16z.news/p/charts-of-the-week-apple",
+        "published": "2026-11-06T15:02:08+00:00",
+    }
+    essay = _item("broken")
+    monkeypatch.setattr(why_pipeline, "WhyFetcher", _fetcher_returning([charts, essay]))
+
+    def fail_llm(model_id: str, system: str, user_message: str, max_tokens: int, use_thinking: bool = False):
+        title = user_message.splitlines()[0]
+        assert "Charts of the Week" not in title
+        return "not json", 1, 1, "end_turn"
+
+    monkeypatch.setattr(why_pipeline, "call_claude_raw", fail_llm)
+    posted: List[Any] = []
+    monkeypatch.setattr(why_pipeline, "post_to_slack", lambda url, payload: posted.append(payload))
+
+    why_pipeline.run_why_pipeline("https://hooks.example", {})
+    text = _text(posted)
+    assert "📊" in text and "Charts of the Week: Apple Skips Capex" in text and "Nov 6" in text
+    assert "Read essay" not in text
+    assert "Not summarised" in text and "broken" in text
+    assert "1 title only" in text
+    assert [e["url"] for e in load_json_list(_isolated_seen_file)] == [
+        "https://www.a16z.news/p/charts-of-the-week-apple",
+    ]
 
 
 def test_run_why_pipeline_raises_when_every_item_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -711,6 +801,42 @@ def test_build_why_slack_payloads_month_only_date() -> None:
     }
     section = build_why_slack_payloads([signal])[0]["blocks"][2]["text"]["text"]
     assert "· Nov 2026" in section
+
+
+def test_charts_card_is_title_and_date_only() -> None:
+    signal = {
+        **_item("Charts of the Week: Apple Skips Capex"),
+        "content_type": "charts",
+        "title_only": True,
+        "summary": [],
+        "link": "https://www.a16z.news/p/charts-of-the-week-apple",
+        "published": "2026-11-06T15:02:08+00:00",
+    }
+    section = build_why_slack_payloads([signal])[0]["blocks"][2]["text"]["text"]
+    assert section == (
+        "📊 *<https://www.a16z.news/p/charts-of-the-week-apple"
+        "|Charts of the Week: Apple Skips Capex>* — _a16z_ · Nov 6"
+    )
+    assert "•" not in section and "Read essay" not in section
+
+
+def test_funnel_counts_charts_as_title_only() -> None:
+    charts = {**_item("Charts of the Week: Apple"), "content_type": "charts", "title_only": True}
+    essay = {**_item("Essay"), "summary": ["x"]}
+    funnel = build_funnel(
+        {"a16z": {"fetched": 25, "in_window": 3, "filtered": 1}},
+        [charts, essay],
+        [],
+        [charts, essay],
+        [],
+    )
+    assert funnel["a16z"]["new"] == 2
+    assert funnel["a16z"]["summarised"] == 1
+    assert funnel["a16z"]["title_only"] == 1
+    assert funnel_line("a16z", funnel["a16z"]) == (
+        "📡 *<https://www.a16z.news/|a16z>*   25 fetched › 3 in window › 2 new › 1 summarised"
+        "  (1 announcements skipped, 1 title only)"
+    )
 
 
 def test_card_header_names_publication_not_writer() -> None:
