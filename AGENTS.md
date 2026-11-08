@@ -15,8 +15,8 @@
 ## Data Pipeline
 
 ### What Profile
-- **Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News, and 机器之心 (Jiqizhixin) via RSS (`feedparser`); Anthropic news and research via SSR HTML scraping (Sanity CMS is no longer publicly accessible without auth).
-- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- CoinDesk` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event, catching cross-language duplicates (e.g. Chinese 机器之心 article vs English coverage). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
+- **Sources**: Techmeme, CoinDesk, TechCrunch, and OpenAI News via RSS (`feedparser`); Anthropic news and research via SSR HTML scraping (Sanity CMS is no longer publicly accessible without auth).
+- **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- CoinDesk` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
 - **Pre-filtering**: Keyword scoring against `KEYWORD_WHITELIST`. Drop zero-score items after dedupe, then keep the top 40 highest-scoring items. `source_counts["relevant"]` counts items with score > 0 per feed after dedup (before top-40 cut); `source_counts["sent_to_llm"]` reflects the final top-40 batch.
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.

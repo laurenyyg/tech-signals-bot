@@ -41,14 +41,14 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 ### `--profile what` — What happened in tech?
 
-**Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News, 机器之心 (Jiqizhixin) via RSS; Anthropic news and research via SSR HTML scraping.
+**Sources**: Techmeme, CoinDesk, TechCrunch, OpenAI News via RSS; Anthropic news and research via SSR HTML scraping.
 
 **Pre-LLM pipeline**:
 1. Fetch all feeds → raw items
 2. Three-pass cross-feed deduplication:
    - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
    - Pass 2: Normalised title (strips ` | TechCrunch`, ` - CoinDesk`-style suffixes)
-   - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — catches cross-language duplicates (e.g. a 机器之心 article covering the same event as an English source)
+   - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement)
 3. Keyword score against `KEYWORD_WHITELIST`. Drop zero-score items.
 4. Keep top 40 by score.
 
