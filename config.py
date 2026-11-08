@@ -3,25 +3,33 @@ from typing import List
 
 SUMMARY_TRUNCATE_CHARS: int = 1500
 
+# Why profile: output budget per item (one Sonnet call per item, thinking included).
+WHY_ITEM_MAX_TOKENS: int = 8000
+# Must exceed the fetch window plus a full month (month-only dates stay in window all month).
+WHY_SEEN_RETENTION_DAYS: int = 60
+# Text sent to the LLM per item (What keeps SUMMARY_TRUNCATE_CHARS).
+WHY_BODY_MAX_CHARS: int = 12000
+# Sources whose feeds carry only an excerpt, so the article page is downloaded.
+# Never add stratechery: pages are paywalled and its links carry the feed owner's token.
+WHY_BODY_FETCH_SOURCES: List[str] = ["a16z", "ben-evans", "deeplearning-ai"]
+
+# a16z posts that are announcements rather than essays. Prefixes are case-insensitive;
+# any title mentioning "a16z" is the firm announcing itself (fellowships, funds, events).
+A16Z_SKIP_TAGS: List[str] = ["Fundraise"]
+A16Z_SKIP_TITLE_PREFIXES: List[str] = [
+    "investing in ",
+    "incubating ",
+    "welcome ",
+    "meet the ",
+    "announcing ",
+    "introducing ",
+]
+A16Z_SKIP_TITLE_SUBSTRINGS: List[str] = ["a16z"]
+
 # How profile
 HOW_DAYS_FILTER: int = 3  # Fetch window; must stay well below HOW_SEEN_RETENTION_DAYS.
 HOW_SEEN_RETENTION_DAYS: int = 60
 HOW_BODY_MAX_CHARS: int = 12000
-
-DEEP_READ_KEYWORDS: List[str] = [
-    "artificial intelligence",
-    "moat",
-    "paradigm shift",
-    "ai productivity",
-    "compute",
-    "capital expenditure",
-    "inference cost",
-    "scaling laws",
-    "agentic workflows",
-    "open weights",
-    "decentralization",
-    "regulatory capture",
-]
 
 SSPAI_WHITELIST_AUTHORS: List[str] = [
     "张立行",
