@@ -148,3 +148,26 @@ def test_what_payloads_empty_is_single_message() -> None:
 
     payloads = build_slack_payloads([], {}, total_tokens=0, budget_status="OK")
     assert len(payloads) == 1 and "No structurally significant" in str(payloads)
+
+
+def test_what_payloads_empty_keeps_warnings_and_funnel() -> None:
+    from main import build_slack_payloads
+
+    source_counts = {
+        "techmeme": {"fetch_failed": 1},
+        "techcrunch": {"fetched": 10, "in_window": 0},
+    }
+    payloads = build_slack_payloads(
+        [],
+        source_counts,
+        total_tokens=0,
+        budget_status="OK",
+        source_errors={"techmeme": "feed returned no entries"},
+    )
+    assert len(payloads) == 1
+    text = str(payloads[0])
+    assert "No structurally significant" in text
+    assert "⚠️ *techmeme* fetch failed: feed returned no entries" in text
+    assert "📡 *Techmeme*   fetch failed" in text
+    assert "📡 quiet: *Techcrunch*" in text
+    assert "Model:" in text
