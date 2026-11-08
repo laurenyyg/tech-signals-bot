@@ -56,7 +56,7 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 
 **Post-run**: Per-source performance stats (fetched, in-window, relevant, sent-to-LLM) are appended to a Google Spreadsheet.
 
-**Schedule**: Sundays at 8:47 PM Vancouver time.
+**Schedule**: Sundays at 22:47 UTC (2:47 PM PST / 3:47 PM PDT).
 
 ---
 
