@@ -4,7 +4,7 @@ Tech Signals Bot — main entry point.
 Usage:
     venv/bin/python main.py --profile what
 
-Note: CLAUDE.md specified claude-3-7-sonnet-20250219, which was retired
+Note: the project conventions (now AGENTS.md) specified claude-3-7-sonnet-20250219, which was retired
 Feb 19 2026. Using claude-sonnet-4-6 with adaptive thinking instead.
 """
 import argparse
@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import anthropic
@@ -21,18 +20,24 @@ from dotenv import load_dotenv
 from common import (
     MAX_TOKENS,
     MODEL_ID,
+    Block,
     build_error_payload,
     build_footer,
     configure_logging,
+    context_blocks,
+    date_range_str,
+    post_payloads,
     post_to_slack,
+    section_block,
+    split_into_messages,
     strip_html,
 )
 from config import SUMMARY_TRUNCATE_CHARS
 from fetchers.rss_fetcher import DAYS_FILTER as WHAT_DAYS_FILTER, RssFetcher
-from fetchers.why_fetcher import DAYS_FILTER as WHY_DAYS_FILTER, WhyFetcher
 from how_pipeline import FOOTER_MODEL_LABEL as HOW_FOOTER_MODEL_LABEL, run_how_pipeline
-from prompts import WHAT_PROFILE_PROMPT, WHY_PROFILE_PROMPT
+from prompts import WHAT_PROFILE_PROMPT
 from sheets_writer import append_what_run, compute_relevant_per_source
+from why_pipeline import run_why_pipeline
 
 load_dotenv()
 
@@ -45,37 +50,26 @@ PROFILES: Dict[str, Dict[str, Any]] = {
         "system_prompt": WHAT_PROFILE_PROMPT,
         "webhook_env": "WHAT_WEBHOOK_URL",
     },
-    "why": {
-        "fetcher_cls": WhyFetcher,
-        "system_prompt": WHY_PROFILE_PROMPT,
-        "webhook_env": "WHY_WEBHOOK_URL",
-        "include_metadata": True,
-    },
 }
 
-HOW_PROFILE: Dict[str, Any] = {"webhook_env": "HOW_WEBHOOK_URL"}
+# Why and How run their own pipelines (per-item calls / two-stage cascade).
+STANDALONE_PROFILES: Dict[str, Dict[str, Any]] = {
+    "why": {"webhook_env": "WHY_WEBHOOK_URL"},
+    "how": {"webhook_env": "HOW_WEBHOOK_URL"},
+}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _format_items_for_prompt(
-    items: List[Dict[str, Any]], include_metadata: bool = False
-) -> str:
+def _format_items_for_prompt(items: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
     for i, item in enumerate(items, 1):
         lines.append(f"{i}. [{item['source'].upper()}] {item['title']}")
-        if include_metadata:
-            if item.get("author"):
-                lines.append(f"   Author: {item['author']}")
-            if item.get("content_type"):
-                lines.append(f"   Type: {item['content_type']}")
         if item.get("summary"):
             clean_summary = strip_html(item["summary"])[:SUMMARY_TRUNCATE_CHARS]
             lines.append(f"   Summary: {clean_summary}")
-        if include_metadata and item.get("link"):
-            lines.append(f"   URL: {item['link']}")
         lines.append("")
     return "\n".join(lines)
 
@@ -83,7 +77,6 @@ def _format_items_for_prompt(
 def call_anthropic(
     items: List[Dict[str, Any]],
     system_prompt: str,
-    include_metadata: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Call the Anthropic API and return (signals, usage_meta).
 
@@ -98,7 +91,7 @@ def call_anthropic(
     user_message = (
         f"Analyse the following {len(items)} pre-scored news items and extract "
         f"paradigm-shifting signals per your mandate:\n\n"
-        + _format_items_for_prompt(items, include_metadata=include_metadata)
+        + _format_items_for_prompt(items)
     )
 
     try:
@@ -146,51 +139,25 @@ def call_anthropic(
     return signals, usage_meta
 
 
-def _date_range_str(days: int) -> str:
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=days)
-    fmt = lambda d: f"{d.strftime('%b')} {d.day}"
-    return f"{fmt(start)} – {fmt(now)}"
-
-
-def build_slack_payload(
+def build_slack_payloads(
     signals: List[Dict[str, Any]],
-    source_counts: Optional[Dict[str, int]] = None,
+    source_counts: Optional[Dict[str, Dict[str, int]]] = None,
     total_tokens: Optional[int] = None,
     budget_status: Optional[str] = None,
-) -> Dict[str, Any]:
-    footer = build_footer(total_tokens, budget_status)
+) -> List[Dict[str, Any]]:
+    """Build the What digest as one or more Slack messages (see split_into_messages)."""
+    footer_blocks = context_blocks([f"\n{build_footer(total_tokens, budget_status)}"])
 
     if not signals:
-        return {
+        return [{
             "text": "Tech Signals Digest — no significant signals detected.",
             "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "_No structurally significant signals detected in today's feed._",
-                    },
-                },
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-                },
+                section_block("_No structurally significant signals detected in today's feed._"),
+                *footer_blocks,
             ],
-        }
+        }]
 
-    blocks: List[Dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"Tech Signals Digest — {len(signals)} signal(s) | {_date_range_str(WHAT_DAYS_FILTER)}",
-                "emoji": True,
-            },
-        },
-        {"type": "divider"},
-    ]
-
+    groups: List[List[Block]] = []
     for signal in signals:
         lines = [
             f"📰 *{signal.get('macro_event', 'Unknown Event')}*: "
@@ -206,164 +173,21 @@ def build_slack_payload(
             )
             lines.append(f"_Sources: {links}_")
 
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "\n".join(lines)},
-            }
-        )
-        blocks.append({"type": "divider"})
+        groups.append([section_block("\n".join(lines)), {"type": "divider"}])
 
-    if source_counts:
-        funnel_lines = []
-        for source, counts in source_counts.items():
-            funnel_lines.append(
-                f"📡 *{source.capitalize()}*   "
-                f"{counts.get('fetched', 0)} fetched  ›  "
-                f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
-                f"{counts.get('relevant', 0)} relevant  ›  "
-                f"{counts.get('sent_to_llm', 0)} sent to LLM"
-            )
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": line} for line in funnel_lines
-                ],
-            }
-        )
-
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-        }
-    )
-
-    return {
-        "text": f"Tech Signals Digest — {len(signals)} signal(s)",
-        "blocks": blocks,
-    }
-
-
-def build_why_slack_payload(
-    signals: List[Dict[str, Any]],
-    source_counts: Optional[Dict[str, int]] = None,
-    total_tokens: Optional[int] = None,
-    budget_status: Optional[str] = None,
-) -> Dict[str, Any]:
-    footer = build_footer(total_tokens, budget_status)
-
-    if not signals:
-        return {
-            "text": "Why Signals Digest — no items detected.",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"_No essays or presentations published in the last {WHY_DAYS_FILTER} days._",
-                    },
-                },
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-                },
-            ],
-        }
-
-    blocks: List[Dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"Why Signals Digest — {len(signals)} item(s) | {_date_range_str(WHY_DAYS_FILTER)}",
-                "emoji": True,
-            },
-        },
-        {"type": "divider"},
+    funnel_lines = [
+        f"📡 *{source.capitalize()}*   "
+        f"{counts.get('fetched', 0)} fetched  ›  "
+        f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
+        f"{counts.get('relevant', 0)} relevant  ›  "
+        f"{counts.get('sent_to_llm', 0)} sent to LLM"
+        for source, counts in (source_counts or {}).items()
     ]
-
-    for signal in signals:
-        content_type: str = signal.get("content_type", "essay")
-        is_deep_read: bool = signal.get("is_deep_read", False)
-
-        if content_type == "podcast":
-            prefix = "🎙"
-        elif content_type == "presentation":
-            prefix = "🗂"
-        elif is_deep_read:
-            prefix = "❗️"
-        else:
-            prefix = "🧠"
-
-        title: str = signal.get("title", "Untitled")
-        author: str = signal.get("author", "")
-        raw_summary = signal.get("summary", [])
-        summary_bullets: List[str] = (
-            raw_summary if isinstance(raw_summary, list) else [raw_summary]
-        )
-        source_url: str = signal.get("source_url", "")
-
-        date_str: str = ""
-        raw_published: str = signal.get("published", "")
-        if raw_published:
-            try:
-                dt = datetime.fromisoformat(raw_published)
-                date_str = dt.strftime("%b %-d")
-            except ValueError:
-                pass
-
-        header_line = f"{prefix} *{title}*"
-        if author:
-            header_line += f" — _{author}_"
-        if date_str:
-            header_line += f" · {date_str}"
-        if content_type == "presentation":
-            header_line += "  `[Presentation]`"
-
-        if content_type == "presentation":
-            read_label = "Find out more"
-        elif content_type == "podcast":
-            read_label = "Read transcript"
-        else:
-            read_label = "Read essay"
-
-        lines = [header_line]
-        lines += [f"• {b}" for b in summary_bullets if b]
-        if source_url:
-            lines.append(f"• _<{source_url}|{read_label}>_")
-
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "\n".join(lines)},
-            }
-        )
-        blocks.append({"type": "divider"})
-
-    if source_counts:
-        counts_str = "  ·  ".join(
-            f"{source}: {count}" for source, count in source_counts.items()
-        )
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"📡 {counts_str}"}],
-            }
-        )
-
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-        }
+    return split_into_messages(
+        f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(WHAT_DAYS_FILTER)}",
+        groups,
+        context_blocks(funnel_lines) + footer_blocks,
     )
-
-    return {
-        "text": f"Why Signals Digest — {len(signals)} item(s)",
-        "blocks": blocks,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -375,26 +199,26 @@ def main() -> None:
     parser.add_argument(
         "--profile",
         required=True,
-        choices=[*PROFILES.keys(), "how"],
+        choices=[*PROFILES.keys(), *STANDALONE_PROFILES.keys()],
         help="Signal profile to run",
     )
     args = parser.parse_args()
 
-    profile: Dict[str, Any] = PROFILES.get(args.profile, HOW_PROFILE)
+    profile: Dict[str, Any] = {**PROFILES, **STANDALONE_PROFILES}[args.profile]
 
     usage_meta: Dict[str, Any] = {}
 
     try:
-        # How pipeline is a two-stage cascade handled separately from PROFILES.
-        # run_how_pipeline updates usage_meta in place so a crash footer shows
+        # Standalone pipelines update usage_meta in place so a crash footer shows
         # tokens spent before the failure.
-        if args.profile == "how":
-            how_webhook = os.getenv(profile["webhook_env"])
-            if not how_webhook:
+        if args.profile in STANDALONE_PROFILES:
+            webhook = os.getenv(profile["webhook_env"])
+            if not webhook:
                 raise EnvironmentError(
                     f"{profile['webhook_env']} is not set in the environment"
                 )
-            run_how_pipeline(how_webhook, usage_meta)
+            runner = run_why_pipeline if args.profile == "why" else run_how_pipeline
+            runner(webhook, usage_meta)
             return
 
         # 1. Fetch
@@ -406,13 +230,12 @@ def main() -> None:
             logger.warning("No items fetched — nothing to analyse.")
             sys.exit(0)
 
-        source_counts: Dict[str, int] = getattr(fetcher, "source_counts", {})
+        source_counts: Dict[str, Dict[str, int]] = getattr(fetcher, "source_counts", {})
 
         # 2. Analyse
         signals, usage_meta = call_anthropic(
             items,
             profile["system_prompt"],
-            include_metadata=profile.get("include_metadata", False),
         )
         logger.info(f"LLM returned {len(signals)} signal(s)")
 
@@ -434,10 +257,7 @@ def main() -> None:
             append_what_run(source_counts, relevant_per_source)
 
         # 3. Format
-        if args.profile == "why":
-            payload = build_why_slack_payload(signals, source_counts=source_counts, **usage_meta)
-        else:
-            payload = build_slack_payload(signals, source_counts=source_counts, **usage_meta)
+        payloads = build_slack_payloads(signals, source_counts=source_counts, **usage_meta)
 
         # 4. Post to Slack
         webhook_url = os.getenv(profile["webhook_env"])
@@ -445,7 +265,7 @@ def main() -> None:
             raise EnvironmentError(
                 f"{profile['webhook_env']} is not set in the environment"
             )
-        post_to_slack(webhook_url, payload)
+        post_payloads(webhook_url, payloads, post=post_to_slack)
 
     except Exception as exc:
         error_msg = str(exc)
@@ -462,6 +282,7 @@ def main() -> None:
             error_footer = build_footer(
                 usage_meta.get("total_tokens"),
                 usage_meta.get("budget_status"),
+                max_tokens=usage_meta.get("max_tokens", MAX_TOKENS),
             )
         error_payload = build_error_payload(error_msg, error_footer)
 
