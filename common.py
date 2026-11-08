@@ -12,7 +12,7 @@ import trafilatura
 
 logger = logging.getLogger(__name__)
 
-# Update CLAUDE.md when changing this; the Slack footer is derived from it.
+# Update AGENTS.md when changing this; the Slack footer is derived from it.
 MODEL_ID = "claude-sonnet-4-6"
 MAX_TOKENS = 16000  # Output token budget; used in API call and Slack footer.
 

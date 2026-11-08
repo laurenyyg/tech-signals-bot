@@ -52,6 +52,15 @@ FILTERED_LABELS: Dict[str, str] = {
     "stratechery-podcasts": "same as an article",
 }
 
+# Card headers name the publication, not the individual writer.
+SOURCE_LABELS: Dict[str, str] = {
+    "stratechery": "Stratechery",
+    "deeplearning-ai": "DeepLearning.AI",
+    "ben-evans": "Benedict Evans",
+    "a16z": "a16z",
+    "one-useful-thing": "One Useful Thing",
+}
+
 Item = Dict[str, Any]
 
 
@@ -253,8 +262,9 @@ def _prefix(signal: Item) -> str:
 def _signal_section(signal: Item) -> Block:
     content_type: str = signal.get("content_type", "essay")
     header_line = f"{_prefix(signal)} *{signal.get('title', 'Untitled')}*"
-    if signal.get("author"):
-        header_line += f" — _{signal['author']}_"
+    source = signal.get("source", "")
+    if source:
+        header_line += f" — _{SOURCE_LABELS.get(source, source)}_"
     date_fmt = "%b %Y" if signal.get("date_precision") == "month" else "%b %-d"
     try:
         header_line += f" · {datetime.fromisoformat(signal.get('published', '')).strftime(date_fmt)}"
