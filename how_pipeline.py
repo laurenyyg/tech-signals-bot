@@ -12,10 +12,16 @@ import seen_ledger
 from common import (
     MAX_TOKENS,
     MODEL_ID,
+    Block,
     build_footer,
     call_claude_raw,
+    context_blocks,
     fetch_body,
+    fit_text,
+    post_payloads,
     post_to_slack,
+    section_block,
+    split_into_messages,
     strip_code_fences,
     strip_html,
 )
@@ -32,10 +38,8 @@ FOOTER_MODEL_LABEL = f"{HAIKU_MODEL_ID} + {MODEL_ID}"
 BACKLOG_FILE = "data/how_backlog.json"
 SEEN_FILE = "data/how_seen.json"
 
-# Slack rejects section text over 3000 chars; leave room for the "Read more" link.
+# Leave room under Slack's 3000-char section limit for the "Read more" link.
 SLACK_SECTION_MAX_CHARS = 2700
-# Slack allows 50 blocks per message; each card is 2 blocks plus 4 for header/funnel/footer.
-SLACK_MAX_CARDS_PER_MESSAGE = 20
 
 # Items whose bouncer call errors stay in the backlog for retry, up to this many runs.
 MAX_ATTEMPTS = 3
@@ -169,7 +173,7 @@ def _funnel_line(source: str, counts: Dict[str, int]) -> str:
     return line
 
 
-def _signal_section(signal: Dict[str, Any]) -> Dict[str, Any]:
+def _signal_section(signal: Dict[str, Any]) -> Block:
     header_line = f"*{signal.get('title', 'Untitled')}*"
     if signal.get("source"):
         header_line += f" — _{signal['source']}_"
@@ -182,12 +186,10 @@ def _signal_section(signal: Dict[str, Any]) -> Dict[str, Any]:
         lines.append(f"📝 *Workflow SOP*:\n{bullets}")
     if signal.get("roi_impact"):
         lines.append(f"💰 *ROI/Impact*: {signal['roi_impact']}")
-    text = "\n".join(lines)
-    if len(text) > SLACK_SECTION_MAX_CHARS:
-        text = text[: SLACK_SECTION_MAX_CHARS - 1] + "…"
+    text = fit_text("\n".join(lines), SLACK_SECTION_MAX_CHARS)
     if signal.get("url"):
         text += f"\n_<{signal['url']}|Read more>_"
-    return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+    return section_block(text)
 
 
 def build_how_slack_payloads(
@@ -198,17 +200,15 @@ def build_how_slack_payloads(
     max_tokens: int = MAX_TOKENS,
     model_label: str = FOOTER_MODEL_LABEL,
 ) -> List[Dict[str, Any]]:
-    """Build the How digest as one or more Slack messages.
+    """Build the How digest as one or more Slack messages (see split_into_messages).
 
-    Cards are split across messages of at most SLACK_MAX_CARDS_PER_MESSAGE so no
-    message exceeds Slack's 50-block limit. The funnel and FinOps footer go on
-    the last message only.
+    The funnel and FinOps footer go on the last message only.
     """
     footer = build_footer(
         total_tokens, budget_status, model_label=model_label, max_tokens=max_tokens
     )
     funnel_lines = [_funnel_line(src, c) for src, c in (funnel or {}).items()]
-    footer_block = {"type": "context", "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}]}
+    footer_blocks = context_blocks([f"\n{footer}"])
 
     if not signals:
         message = (
@@ -218,43 +218,17 @@ def build_how_slack_payloads(
         )
         return [{
             "text": "How Signals Digest — no workflow SOPs found.",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": "\n".join([message] + funnel_lines)},
-                },
-                footer_block,
-            ],
+            "blocks": [section_block("\n".join([message] + funnel_lines)), *footer_blocks],
         }]
 
-    chunks = [
-        signals[i : i + SLACK_MAX_CARDS_PER_MESSAGE]
-        for i in range(0, len(signals), SLACK_MAX_CARDS_PER_MESSAGE)
+    groups: List[List[Block]] = [
+        [_signal_section(signal), {"type": "divider"}] for signal in signals
     ]
-    payloads: List[Dict[str, Any]] = []
-    for index, chunk in enumerate(chunks, 1):
-        title = f"How Signals Digest — {len(signals)} workflow(s)"
-        if len(chunks) > 1:
-            title += f" ({index}/{len(chunks)})"
-
-        blocks: List[Dict[str, Any]] = [
-            {"type": "header", "text": {"type": "plain_text", "text": title, "emoji": True}},
-            {"type": "divider"},
-        ]
-        for signal in chunk:
-            blocks.append(_signal_section(signal))
-            blocks.append({"type": "divider"})
-
-        if index == len(chunks):
-            if funnel_lines:
-                blocks.append({
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": line} for line in funnel_lines],
-                })
-            blocks.append(footer_block)
-
-        payloads.append({"text": title, "blocks": blocks})
-    return payloads
+    return split_into_messages(
+        f"How Signals Digest — {len(signals)} workflow(s)",
+        groups,
+        context_blocks(funnel_lines) + footer_blocks,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +367,7 @@ def run_how_pipeline(webhook_url: str, usage_meta: Dict[str, Any]) -> None:
             m for m, used in ((HAIKU_MODEL_ID, bounced > 0), (MODEL_ID, bool(passed))) if used
         ) or FOOTER_MODEL_LABEL,
     )
-    for payload in payloads:
-        post_to_slack(webhook_url, payload)  # raises on failure — state left intact
+    post_payloads(webhook_url, payloads, post=post_to_slack)  # raises — state left intact
 
     # State update — only reached on successful post
     retry: List[Dict[str, Any]] = []

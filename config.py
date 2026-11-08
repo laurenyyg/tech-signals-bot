@@ -7,6 +7,11 @@ SUMMARY_TRUNCATE_CHARS: int = 1500
 WHY_ITEM_MAX_TOKENS: int = 8000
 # Must exceed the fetch window plus a full month (month-only dates stay in window all month).
 WHY_SEEN_RETENTION_DAYS: int = 60
+# Text sent to the LLM per item (What keeps SUMMARY_TRUNCATE_CHARS).
+WHY_BODY_MAX_CHARS: int = 12000
+# Sources whose feeds carry only an excerpt, so the article page is downloaded.
+# Never add stratechery: pages are paywalled and its links carry the feed owner's token.
+WHY_BODY_FETCH_SOURCES: List[str] = ["a16z", "ben-evans", "deeplearning-ai"]
 
 # a16z posts that are announcements rather than essays. Prefixes are case-insensitive;
 # any title mentioning "a16z" is the firm announcing itself (fellowships, funds, events).

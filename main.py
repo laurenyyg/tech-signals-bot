@@ -20,11 +20,16 @@ from dotenv import load_dotenv
 from common import (
     MAX_TOKENS,
     MODEL_ID,
+    Block,
     build_error_payload,
     build_footer,
     configure_logging,
+    context_blocks,
     date_range_str,
+    post_payloads,
     post_to_slack,
+    section_block,
+    split_into_messages,
     strip_html,
 )
 from config import SUMMARY_TRUNCATE_CHARS
@@ -134,44 +139,25 @@ def call_anthropic(
     return signals, usage_meta
 
 
-def build_slack_payload(
+def build_slack_payloads(
     signals: List[Dict[str, Any]],
-    source_counts: Optional[Dict[str, int]] = None,
+    source_counts: Optional[Dict[str, Dict[str, int]]] = None,
     total_tokens: Optional[int] = None,
     budget_status: Optional[str] = None,
-) -> Dict[str, Any]:
-    footer = build_footer(total_tokens, budget_status)
+) -> List[Dict[str, Any]]:
+    """Build the What digest as one or more Slack messages (see split_into_messages)."""
+    footer_blocks = context_blocks([f"\n{build_footer(total_tokens, budget_status)}"])
 
     if not signals:
-        return {
+        return [{
             "text": "Tech Signals Digest — no significant signals detected.",
             "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "_No structurally significant signals detected in today's feed._",
-                    },
-                },
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-                },
+                section_block("_No structurally significant signals detected in today's feed._"),
+                *footer_blocks,
             ],
-        }
+        }]
 
-    blocks: List[Dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(WHAT_DAYS_FILTER)}",
-                "emoji": True,
-            },
-        },
-        {"type": "divider"},
-    ]
-
+    groups: List[List[Block]] = []
     for signal in signals:
         lines = [
             f"📰 *{signal.get('macro_event', 'Unknown Event')}*: "
@@ -187,44 +173,21 @@ def build_slack_payload(
             )
             lines.append(f"_Sources: {links}_")
 
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "\n".join(lines)},
-            }
-        )
-        blocks.append({"type": "divider"})
+        groups.append([section_block("\n".join(lines)), {"type": "divider"}])
 
-    if source_counts:
-        funnel_lines = []
-        for source, counts in source_counts.items():
-            funnel_lines.append(
-                f"📡 *{source.capitalize()}*   "
-                f"{counts.get('fetched', 0)} fetched  ›  "
-                f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
-                f"{counts.get('relevant', 0)} relevant  ›  "
-                f"{counts.get('sent_to_llm', 0)} sent to LLM"
-            )
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": line} for line in funnel_lines
-                ],
-            }
-        )
-
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"\n{footer}"}],
-        }
+    funnel_lines = [
+        f"📡 *{source.capitalize()}*   "
+        f"{counts.get('fetched', 0)} fetched  ›  "
+        f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
+        f"{counts.get('relevant', 0)} relevant  ›  "
+        f"{counts.get('sent_to_llm', 0)} sent to LLM"
+        for source, counts in (source_counts or {}).items()
+    ]
+    return split_into_messages(
+        f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(WHAT_DAYS_FILTER)}",
+        groups,
+        context_blocks(funnel_lines) + footer_blocks,
     )
-
-    return {
-        "text": f"Tech Signals Digest — {len(signals)} signal(s)",
-        "blocks": blocks,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +230,7 @@ def main() -> None:
             logger.warning("No items fetched — nothing to analyse.")
             sys.exit(0)
 
-        source_counts: Dict[str, int] = getattr(fetcher, "source_counts", {})
+        source_counts: Dict[str, Dict[str, int]] = getattr(fetcher, "source_counts", {})
 
         # 2. Analyse
         signals, usage_meta = call_anthropic(
@@ -294,7 +257,7 @@ def main() -> None:
             append_what_run(source_counts, relevant_per_source)
 
         # 3. Format
-        payload = build_slack_payload(signals, source_counts=source_counts, **usage_meta)
+        payloads = build_slack_payloads(signals, source_counts=source_counts, **usage_meta)
 
         # 4. Post to Slack
         webhook_url = os.getenv(profile["webhook_env"])
@@ -302,7 +265,7 @@ def main() -> None:
             raise EnvironmentError(
                 f"{profile['webhook_env']} is not set in the environment"
             )
-        post_to_slack(webhook_url, payload)
+        post_payloads(webhook_url, payloads, post=post_to_slack)
 
     except Exception as exc:
         error_msg = str(exc)
