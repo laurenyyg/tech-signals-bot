@@ -4,7 +4,7 @@
 - Run What pipeline: `venv/bin/python main.py --profile what`
 - Run Why pipeline: `venv/bin/python main.py --profile why`
 - Run How synthesizer: `venv/bin/python main.py --profile how`
-- Run How catcher (no LLM): `venv/bin/python catch_how.py`
+- Run How catcher (no LLM): `venv/bin/python catch_how.py` (backfill: `--days 14`)
 - Install dependencies: `venv/bin/pip install -r requirements.txt`
 - Run tests: `venv/bin/python -m pytest tests/`
 
@@ -28,12 +28,15 @@
 - **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 1500 chars via `SUMMARY_TRUNCATE_CHARS` in `config.py`), and URL included. 1-to-1 mapping (no clustering).
 
 ### How Profile (Decoupled)
-- **Daily Catcher** (`catch_how.py`): Fetches ChatPRD and SSPAI, deduplicates by URL, appends to `data/how_backlog.json`. No LLM calls. Runs daily via GitHub Actions and commits the updated backlog to the repo.
-- **Weekly Synthesizer** (`main.py --profile how`): Reads the accumulated backlog and runs a two-stage LLM cascade:
-  - **Stage 1 — Haiku Bouncer** (`claude-3-5-haiku-20241022`, max 1024 tokens): Filters out articles with no replicable workflow SOP. Returns `NULL` for non-workflow content; returns raw tool stack + step-by-step text for passing items.
-  - **Stage 2 — Sonnet Formatter** (`claude-sonnet-4-6`, max 16,000 tokens, with thinking): Structures Haiku-extracted text into `HowSignal` JSON (`tech_stack`, `workflow_steps`, `roi_impact`).
-  - **State reset**: `data/how_backlog.json` is overwritten with `[]` **only if** the Slack post succeeds. Failed runs leave the backlog intact for retry next week.
-- **SSPAI filter**: Author whitelist takes priority; otherwise, items must match `HOW_POSITIVE_KEYWORDS` and not match `HOW_NEGATIVE_KEYWORDS` (defined in `config.py`).
+- **Daily Catcher** (`catch_how.py`): Fetches ChatPRD and SSPAI items published in the last `HOW_DAYS_FILTER` (3) days (`--days N` for a one-off backfill). Skips URLs already in the backlog or the seen ledger, downloads each new page and stores its extracted text (`fetch_body()` → `preprocess_article()`, truncated to `HOW_BODY_MAX_CHARS`) as `body`, and appends to `data/how_backlog.json`. No LLM calls. Each source runs in its own `try`; a failing source posts a 🚨 alert to `HOW_WEBHOOK_URL` and the other source still runs. Exits non-zero only if every source fails. Runs daily via GitHub Actions and commits the backlog and ledger.
+- **ChatPRD source**: Parses `PodcastSeries.hasPart` (`PodcastEpisode`) JSON-LD on the How I AI page, with the legacy `blogPost` shape as fallback. Raises if neither is present.
+- **SSPAI filter**: Author whitelist takes priority; otherwise, items must match `HOW_POSITIVE_KEYWORDS` and not match `HOW_NEGATIVE_KEYWORDS` (defined in `config.py`). ASCII keywords (`AI`, `API`, …) match as whole words, case-insensitive; CJK keywords match as substrings. Raises if the feed returns no entries.
+- **Weekly Synthesizer** (`main.py --profile how` → `how_pipeline.run_how_pipeline`): Reads the backlog and runs a two-stage LLM cascade:
+ - **Stage 1 — Haiku Bouncer** (`claude-haiku-4-5-20251001`, max 1024 tokens, one call per item): Input is title + `body` (re-fetched if empty, falling back to the feed summary). First output line is `PASS` or `NULL` (prefix match, so `NULL.` counts); `PASS` is followed by tool stack, steps, and outcome as plain text.
+ - **Stage 2 — Sonnet Formatter** (`claude-sonnet-4-6`, max 16,000 tokens, with thinking): **One batched call** over all passing items, referenced by numeric ID. Returns `source_id` + `tech_stack`, `workflow_steps`, `roi_impact`; title, source, and URL are resolved from metadata.
+ - **Failure policy**: If every Stage 1 call errors, or Stage 2 errors or returns invalid JSON, the run raises and posts a 🚨 alert. Individual Stage 1 errors are shown in the funnel line; those items stay in the backlog for retry (up to `MAX_ATTEMPTS` = 3 runs).
+ - **State update**: **Only if** the Slack post succeeds, the backlog is rewritten to just the retry items and processed URLs are appended to `data/how_seen.json`. Failed runs leave both files untouched.
+- **Seen ledger** (`data/how_seen.json`): `{url, processed_at}` entries, pruned to `HOW_SEEN_RETENTION_DAYS` (60) on every write. Prevents items from re-entering the backlog after the weekly reset. Retention must stay well above `HOW_DAYS_FILTER`.
 
 ### Shared
 - **Environment**: Sensitive keys read from `.env` via `os.getenv`. Required: `ANTHROPIC_API_KEY`, `WHAT_WEBHOOK_URL`, `WHY_WEBHOOK_URL`, `HOW_WEBHOOK_URL`, `STRATECHERY_RSS_URL`, `STRATECHERY_PODCAST_URL` (Why profile). Optional: `DATAIMPULSE_PROXY_URL`.
@@ -45,7 +48,7 @@
 - **Thinking**: `{"type": "adaptive"}` — enabled for What, Why, and How Stage 2 (Sonnet only; not supported by Haiku).
 - **Max tokens**: 16,000 output token budget for Sonnet calls.
 - **Haiku (What dedup)**: `claude-haiku-4-5-20251001` — semantic cross-feed deduplication only.
-- **Haiku (How bouncer)**: `claude-3-5-haiku-20241022` — Stage 1 cognitive filter, max 1024 output tokens.
+- **Haiku (How bouncer)**: `claude-haiku-4-5-20251001` — Stage 1 cognitive filter, max 1024 output tokens. (`claude-3-5-haiku-20241022` is retired and returns 404.)
 - **Persona (What)**: Ruthless intelligence analyst — no PR fluff, ELI5 mechanics, Boglehead investment lens, cluster related items, drop non-structural noise. Focus areas: AI model releases/breakthroughs, real-world AI impact evidence, crypto protocol shifts, semiconductor/compute infra, structural regulation.
 - **Persona (Why)**: Strategic intelligence analyst — dense bullet-point summaries extracting core thesis and second-order infrastructure/economic implications.
 - **Persona (How)**: Ruthless reverse-engineer — extracts replicable SOPs, ignores personal stories and fluff. Three-step output: Trigger → Process → Output.
@@ -54,7 +57,7 @@
 - Every Slack post must include a FinOps footer: `_Model: [model_id] | Tokens: [total_used]/[max_tokens] | Budget: [OK/Hit]_`
   - `Budget: Hit` when `stop_reason == 'max_tokens'` (What/Why) or when any stage output tokens reach its limit (How cascade).
   - If the pipeline crashes before the API call completes, show the model ID but use `N/A` for token counts.
-  - For the How cascade, `total_used` is the aggregate of all Haiku + Sonnet calls in that run.
+  - For the How cascade, `model_id` is `claude-haiku-4-5-20251001 + claude-sonnet-4-6`, `total_used` is the aggregate of all Haiku + Sonnet calls in that run, and `max_tokens` is the sum of the per-call output budgets for the calls made.
 - If the pipeline crashes, send a 🚨 Alert block to Slack with the exception details.
 
 ### What Profile Visual Hierarchy
@@ -72,7 +75,8 @@
 - 🛠️ **Tech Stack**: comma-separated tool list.
 - 📝 **Workflow SOP**: 3 bullet points (Step 1: Trigger, Step 2: Process, Step 3: Output).
 - 💰 **ROI/Impact**: one sentence with concrete pain point and measurable gain.
-- Source counts per feed (from backlog) before FinOps footer.
+- Funnel line per source before FinOps footer: `N caught › N passed bouncer › N workflow(s)`, plus `(N errored)` when Stage 1 calls failed.
+- Empty backlog still posts ("No new items were caught this week.") so the weekly run is always visible.
 
 ## Testing
 - Tests must use local mocked XML strings — no live HTTP requests.
