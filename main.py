@@ -52,7 +52,7 @@ from seen_ledger import (
     prune_seen,
     save_json_list,
 )
-from sheets_writer import append_what_run, compute_relevant_per_source
+from sheets_writer import append_what_run, spreadsheet_link
 from why_pipeline import run_why_pipeline
 
 load_dotenv()
@@ -128,6 +128,21 @@ def _format_items_for_prompt(items: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def resolve_source_urls(
+    signals: List[Dict[str, Any]], items: List[Dict[str, Any]]
+) -> None:
+    """Replace each signal's source_ids with URLs from items. Unknown ids are dropped."""
+    id_to_url: Dict[int, str] = {
+        i: item.get("link", "") for i, item in enumerate(items, 1)
+    }
+    for signal in signals:
+        signal["source_urls"] = [
+            id_to_url[sid]
+            for sid in signal.pop("source_ids", [])
+            if sid in id_to_url and id_to_url[sid]
+        ]
+
+
 def call_anthropic(
     items: List[Dict[str, Any]],
     system_prompt: str,
@@ -200,13 +215,16 @@ def build_slack_payloads(
     budget_status: Optional[str] = None,
     source_errors: Optional[Dict[str, str]] = None,
     window_days: int = WHAT_DAYS_FILTER,
+    spreadsheet_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build the What digest as one or more Slack messages (see split_into_messages).
 
     Cards come first; source-error warnings, the per-source funnel, and the
     FinOps footer go on the last message.
     """
-    footer_blocks = context_blocks([f"\n{build_footer(total_tokens, budget_status)}"])
+    footer_blocks = context_blocks([
+        f"\n{build_footer(total_tokens, budget_status, extra=spreadsheet_link(spreadsheet_id))}"
+    ])
 
     groups: List[List[Block]] = []
     for signal in signals:
@@ -317,8 +335,11 @@ def main() -> None:
                 total_tokens=0,
                 budget_status="OK",
                 window_days=window_days,
+                spreadsheet_id=os.getenv("GOOGLE_SPREADSHEET_ID"),
             )
             post_payloads(webhook_url, payloads, post=post_to_slack)
+            if args.profile == "what":
+                append_what_run(source_counts)
             return
 
         # 2. Analyse
@@ -330,20 +351,7 @@ def main() -> None:
 
         # 2a. Resolve source_ids → source_urls for What profile
         if args.profile == "what":
-            id_to_url: Dict[int, str] = {
-                i: item.get("link", "") for i, item in enumerate(items, 1)
-            }
-            for signal in signals:
-                signal["source_urls"] = [
-                    id_to_url[sid]
-                    for sid in signal.pop("source_ids", [])
-                    if sid in id_to_url and id_to_url[sid]
-                ]
-
-        # 2b. Track source performance in Google Sheets (What profile only)
-        if args.profile == "what":
-            relevant_per_source = compute_relevant_per_source(signals, items)
-            append_what_run(source_counts, relevant_per_source)
+            resolve_source_urls(signals, items)
 
         # 3. Format and post
         payloads = build_slack_payloads(
@@ -351,9 +359,13 @@ def main() -> None:
             source_counts=source_counts,
             source_errors=source_errors,
             window_days=window_days,
+            spreadsheet_id=os.getenv("GOOGLE_SPREADSHEET_ID"),
             **usage_meta,
         )
-        post_payloads(webhook_url, payloads, post=post_to_slack)  # raises — ledger left untouched
+        post_payloads(webhook_url, payloads, post=post_to_slack)  # raises — ledger/Sheets left untouched
+
+        if args.profile == "what":
+            append_what_run(source_counts)
 
         seen = mark_seen(seen, [ledger_key(item) for item in items], now)
         save_json_list(SEEN_FILE, seen)

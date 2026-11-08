@@ -65,7 +65,7 @@ Session tracker for the Why pipeline rewrite. Update as items land.
 
 ## Notes
 
-- Pre-existing, out of scope: unused `SUMMARY_TRUNCATE_CHARS` import in `fetchers/rss_fetcher.py`; `models.py` dataclasses are unused.
+- Pre-existing, out of scope: `models.py` `WhySignal` / `HowSignal` dataclasses are unused.
 - Local venv is Python 3.9; CI runs 3.11 — avoid 3.10+ syntax.
 - ~~a16z items from Nov 2–5 were never posted~~ — recovered by the Nov 8 manual run.
 - ~~a16z inputs were only ~330 tokens each~~ → full bodies now fetched (a16z/Ben Evans pages ~11–20k chars, DL.AI letters ~2.7k).

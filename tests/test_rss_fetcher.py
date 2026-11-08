@@ -1,7 +1,7 @@
 """Unit tests for What-profile RSS helpers (mocked feeds only, no live HTTP)."""
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Dict
 
 import feedparser
 import pytest
@@ -157,9 +157,64 @@ def test_parse_what_feed_all_undated_raises() -> None:
         parse_what_feed(feed, CUTOFF, "techcrunch")
 
 
+def _ssr_html(*posts: Dict[str, str]) -> str:
+    """Minimal Next.js RSC payload: escaped JSON field order the parser expects."""
+    chunks = [
+        (
+            f'\\"publishedOn\\":\\"{p["published"]}\\"'
+            f',\\"slug\\":{{\\"_type\\":\\"slug\\",\\"current\\":\\"{p["slug"]}\\"}}'
+            f',\\"subjects\\":[]'
+            f',\\"summary\\":\\"{p.get("summary", "")}\\"'
+            f',\\"title\\":\\"{p["title"]}\\"'
+        )
+        for p in posts
+    ]
+    payload = " ".join(chunks)
+    return (
+        "<html><body><script>"
+        f'self.__next_f.push([1,"{payload}"])'
+        "</script></body></html>"
+    )
+
+
 def test_parse_anthropic_ssr_empty_html() -> None:
     assert _parse_anthropic_ssr("") == []
     assert _parse_anthropic_ssr("<html><body>no payload</body></html>") == []
+
+
+def test_parse_anthropic_ssr_fixture_keeps_old_skips_bad_dedupes_slug() -> None:
+    html = _ssr_html(
+        {
+            "published": "2026-11-06T12:00:00.000Z",
+            "slug": "claude-opus",
+            "summary": "Opus ships.",
+            "title": "Claude Opus",
+        },
+        {
+            "published": "2025-01-01T00:00:00.000Z",
+            "slug": "old-post",
+            "summary": "Old.",
+            "title": "Old Post",
+        },
+        {
+            "published": "not-a-date",
+            "slug": "bad-date",
+            "summary": "x",
+            "title": "Bad Date",
+        },
+        {
+            "published": "2026-11-07T00:00:00Z",
+            "slug": "claude-opus",
+            "summary": "dup",
+            "title": "Dup",
+        },
+    )
+    posts = _parse_anthropic_ssr(html)
+    assert [(p["slug"], p["title"]) for p in posts] == [
+        ("claude-opus", "Claude Opus"),
+        ("old-post", "Old Post"),
+    ]
+    assert posts[0]["summary"] == "Opus ships."
 
 
 def test_funnel_lines_folds_quiet_keeps_failed() -> None:
@@ -171,14 +226,16 @@ def test_funnel_lines_folds_quiet_keeps_failed() -> None:
         "anthropic_research": {"fetched": 8, "in_window": 0},
     }
     assert funnel_line("openai_news", counts["openai_news"]) == (
-        "📡 *Openai_news*   fetch failed"
+        "📡 *<https://openai.com/news|Openai_news>*   fetch failed"
     )
     lines = funnel_lines(counts)
     assert "in last 8d" in lines[0]
-    assert lines[0].startswith("📡 *Techmeme*")
-    assert "*Openai_news*   fetch failed" in lines[1]
+    assert lines[0].startswith("📡 *<https://www.techmeme.com/|Techmeme>*")
+    assert "*<https://openai.com/news|Openai_news>*   fetch failed" in lines[1]
     assert lines[-1] == (
-        "📡 quiet: *Techcrunch*, *Anthropic_news*, *Anthropic_research*"
+        "📡 quiet: *<https://techcrunch.com/|Techcrunch>*, "
+        "*<https://www.anthropic.com/news|Anthropic_news>*, "
+        "*<https://www.anthropic.com/research|Anthropic_research>*"
         "  (43 fetched, 0 in window)"
     )
     stretched = funnel_line(
@@ -261,3 +318,23 @@ def test_drop_seen_uses_canonical_url() -> None:
     )
     assert [i["title"] for i in dropped] == ["OpenAI GPT-5"]
     assert [i["title"] for i in fresh] == ["TSMC 2nm"]
+
+
+def test_resolve_source_urls_drops_unknown_and_empty() -> None:
+    from main import resolve_source_urls
+
+    items = [
+        {"link": "https://x/one", "source": "techmeme"},
+        {"link": "", "source": "techcrunch"},
+        {"link": "https://x/three", "source": "openai_news"},
+    ]
+    signals = [
+        {"macro_event": "A", "source_ids": [1, 2, 99, 3]},
+        {"macro_event": "B", "source_ids": [1]},
+        {"macro_event": "C"},
+    ]
+    resolve_source_urls(signals, items)
+    assert signals[0]["source_urls"] == ["https://x/one", "https://x/three"]
+    assert "source_ids" not in signals[0]
+    assert signals[1]["source_urls"] == ["https://x/one"]
+    assert signals[2]["source_urls"] == []

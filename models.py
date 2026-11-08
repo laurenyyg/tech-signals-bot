@@ -1,14 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
-
-
-@dataclass
-class NewsSignal:
-    macro_event: str
-    core_fact: str
-    eli5: str
-    investment_impact: str
-    source_urls: List[str] = field(default_factory=list)
 
 
 @dataclass

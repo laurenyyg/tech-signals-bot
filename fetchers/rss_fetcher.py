@@ -12,7 +12,7 @@ import feedparser
 import requests
 
 from common import keyword_pattern, strip_code_fences
-from config import SUMMARY_TRUNCATE_CHARS, WHAT_DAYS_FILTER
+from config import WHAT_DAYS_FILTER
 from fetchers.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,13 @@ ANTHROPIC_PAGES: Dict[str, str] = {
 }
 ANTHROPIC_SOURCES: Tuple[str, ...] = ("anthropic_news", "anthropic_research")
 WHAT_SOURCES: Tuple[str, ...] = tuple(FEEDS) + ANTHROPIC_SOURCES
+# Funnel names link to the publication homepage (not the RSS URL).
+SOURCE_HOME_URLS: Dict[str, str] = {
+    "techmeme": "https://www.techmeme.com/",
+    "techcrunch": "https://techcrunch.com/",
+    "openai_news": "https://openai.com/news",
+    **ANTHROPIC_PAGES,
+}
 
 _TRACKING_QUERY_EXACT = frozenset(
     {"fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "_ga"}
@@ -358,13 +365,18 @@ def parse_what_feed(
 
 
 def _source_label(source: str) -> str:
-    return f"*{source.capitalize()}*"
+    """Slack mrkdwn for a funnel source name, linked when we have a homepage."""
+    name = source.capitalize()
+    url = SOURCE_HOME_URLS.get(source)
+    if url:
+        return f"*<{url}|{name}>*"
+    return f"*{name}*"
 
 
 def funnel_line(
     source: str, counts: Dict[str, int], window_days: int = DAYS_FILTER
 ) -> str:
-    """'📡 *Techmeme*   40 fetched › 12 in last 8d › …' or '📡 *Techmeme*   fetch failed'."""
+    """'📡 *<https://www.techmeme.com/|Techmeme>*   40 fetched › 12 in last 8d › …'."""
     label = _source_label(source)
     if counts.get("fetch_failed"):
         return f"📡 {label}   fetch failed"
