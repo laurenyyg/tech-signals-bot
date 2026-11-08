@@ -82,5 +82,5 @@ Ledger + stretch (floor 8, cap 14), same shape as Why. `data/what_seen.json` is 
 
 - Local venv is Python 3.9; CI runs 3.11 — avoid 3.10+ syntax.
 - `keyword_pattern()` in `common.py` is shared by How (default) and What (`hyphen_continues_word=True`).
-- Anthropic pages are Next.js SSR; `_parse_anthropic_ssr` assumes field order `publishedOn` → `slug` → `summary` → `title`.
+- Anthropic pages are Next.js SSR; `_parse_anthropic_ssr` matches listing cards by `slug._type == slug` (extra CMS fields between `publishedOn` and `slug` are fine) and scans every Flight script chunk.
 
