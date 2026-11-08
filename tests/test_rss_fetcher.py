@@ -8,6 +8,7 @@ import pytest
 
 from fetchers.rss_fetcher import (
     RssFetcher,
+    _anthropic_published_dt,
     _dedupe_items,
     _normalize_title,
     _normalize_url,
@@ -157,23 +158,39 @@ def test_parse_what_feed_all_undated_raises() -> None:
         parse_what_feed(feed, CUTOFF, "techcrunch")
 
 
-def _ssr_html(*posts: Dict[str, str]) -> str:
-    """Minimal Next.js RSC payload: escaped JSON field order the parser expects."""
-    chunks = [
-        (
-            f'\\"publishedOn\\":\\"{p["published"]}\\"'
-            f',\\"slug\\":{{\\"_type\\":\\"slug\\",\\"current\\":\\"{p["slug"]}\\"}}'
-            f',\\"subjects\\":[]'
-            f',\\"summary\\":\\"{p.get("summary", "")}\\"'
-            f',\\"title\\":\\"{p["title"]}\\"'
-        )
-        for p in posts
-    ]
-    payload = " ".join(chunks)
+def _ssr_script(payload: str) -> str:
+    return f'<script>self.__next_f.push([1,"{payload}"])</script>'
+
+
+def _ssr_listing(post: Dict[str, str], extra_before_slug: str = "") -> str:
+    """Escaped listing-card JSON. extra_before_slug is the current CMS gap
+    (sensitive / seoDescription); the old fixture leaves it empty and keeps
+    a subjects array between slug and summary."""
+    gap = extra_before_slug
+    after_slug = post.get("after_slug", ',\\"subjects\\":[]')
     return (
-        "<html><body><script>"
-        f'self.__next_f.push([1,"{payload}"])'
-        "</script></body></html>"
+        f'\\"publishedOn\\":\\"{post["published"]}\\"'
+        f"{gap}"
+        f',\\"slug\\":{{\\"_type\\":\\"slug\\",\\"current\\":\\"{post["slug"]}\\"}}'
+        f"{after_slug}"
+        f',\\"summary\\":\\"{post.get("summary", "")}\\"'
+        f',\\"title\\":\\"{post["title"]}\\"'
+    )
+
+
+def _ssr_html(*posts: Dict[str, str], extra_before_slug: str = "") -> str:
+    """Minimal Next.js RSC payload wrapping listing cards in one script tag."""
+    payload = " ".join(_ssr_listing(p, extra_before_slug) for p in posts)
+    return f"<html><body>{_ssr_script(payload)}</body></html>"
+
+
+def _ssr_related(title: str, slug: str, published: str) -> str:
+    """Slimmer related-article card: slug has no _type, no summary."""
+    return (
+        f'{{\\"_id\\":\\"x\\",\\"_type\\":\\"article\\",\\"title\\":\\"{title}\\"'
+        f',\\"slug\\":{{\\"current\\":\\"{slug}\\"}}'
+        f',\\"articleType\\":\\"news\\",\\"publishedOn\\":\\"{published}\\"'
+        f',\\"category\\":\\"Science\\"}}'
     )
 
 
@@ -215,6 +232,97 @@ def test_parse_anthropic_ssr_fixture_keeps_old_skips_bad_dedupes_slug() -> None:
         ("old-post", "Old Post"),
     ]
     assert posts[0]["summary"] == "Opus ships."
+
+
+def test_parse_anthropic_ssr_current_shape_extra_fields_date_only() -> None:
+    extra = (
+        ',\\"sensitive\\":false'
+        ',\\"seoDescription\\":\\"We are expanding the program.\\"'
+    )
+    html = _ssr_html(
+        {
+            "published": "2026-10-28",
+            "slug": "ai-for-science-expands",
+            "summary": "We're highlighting 20 institutions.",
+            "title": "AI for Science expands",
+            "after_slug": "",
+        },
+        extra_before_slug=extra,
+    )
+    posts = _parse_anthropic_ssr(html)
+    assert [(p["slug"], p["published"], p["title"]) for p in posts] == [
+        ("ai-for-science-expands", "2026-10-28", "AI for Science expands"),
+    ]
+    assert posts[0]["summary"] == "We're highlighting 20 institutions."
+
+
+def test_parse_anthropic_ssr_scans_later_script_ignores_related_cards() -> None:
+    related = _ssr_related("Related teaser", "related-teaser", "2026-11-06")
+    listing = _ssr_listing(
+        {
+            "published": "2026-11-06",
+            "slug": "teaching-ai-to-build-scientific-models",
+            "summary": "Models from papers.",
+            "title": "Teaching AI to build scientific models",
+            "after_slug": "",
+        },
+        extra_before_slug=',\\"sensitive\\":false,\\"seoDescription\\":null',
+    )
+    html = (
+        "<html><body>"
+        + _ssr_script(related)
+        + _ssr_script(listing)
+        + "</body></html>"
+    )
+    posts = _parse_anthropic_ssr(html)
+    assert [p["slug"] for p in posts] == ["teaching-ai-to-build-scientific-models"]
+
+
+def test_parse_anthropic_ssr_strips_title_does_not_pair_related_date() -> None:
+    related = _ssr_related("Related teaser", "related-teaser", "2026-01-01")
+    listing = _ssr_listing(
+        {
+            "published": "2026-11-06",
+            "slug": "vault-particles",
+            "summary": "Biology puzzle.",
+            "title": " Investigating vault particles",
+            "after_slug": "",
+        }
+    )
+    html = f"<html><body>{_ssr_script(related + listing)}</body></html>"
+    posts = _parse_anthropic_ssr(html)
+    assert [(p["slug"], p["published"], p["title"]) for p in posts] == [
+        ("vault-particles", "2026-11-06", "Investigating vault particles"),
+    ]
+
+
+def test_parse_anthropic_ssr_null_summary_kept() -> None:
+    payload = (
+        '\\"publishedOn\\":\\"2026-09-18\\"'
+        ',\\"sensitive\\":null,\\"seoDescription\\":\\"Partnering on evals.\\"'
+        ',\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"accenture-embedded-evaluation\\"}'
+        ',\\"summary\\":null'
+        ',\\"title\\":\\" Partnering with Accenture on embedded evaluation\\"'
+    )
+    html = f"<html><body>{_ssr_script(payload)}</body></html>"
+    posts = _parse_anthropic_ssr(html)
+    assert [(p["slug"], p["summary"], p["title"]) for p in posts] == [
+        (
+            "accenture-embedded-evaluation",
+            "",
+            "Partnering with Accenture on embedded evaluation",
+        ),
+    ]
+
+
+def test_anthropic_published_dt_date_only_is_end_of_utc_day() -> None:
+    cutoff = datetime(2026, 10, 28, 6, 0, tzinfo=timezone.utc)
+    date_only = _anthropic_published_dt("2026-10-28")
+    assert date_only is not None
+    assert date_only >= cutoff
+    stamp = _anthropic_published_dt("2026-10-28T00:00:00.000Z")
+    assert stamp is not None
+    assert stamp < cutoff
 
 
 def test_funnel_lines_folds_quiet_keeps_failed() -> None:

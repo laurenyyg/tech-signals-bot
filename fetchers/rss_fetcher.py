@@ -131,6 +131,21 @@ def _parse_iso_datetime(value: str) -> Optional[datetime]:
         return None
 
 
+def _anthropic_published_dt(value: str) -> Optional[datetime]:
+    """UTC datetime for an Anthropic publishedOn value.
+
+    Listing cards now often ship a date-only string (``2026-10-28``). Treat that
+    as the end of the UTC day so the post stays in-window if the cutoff falls
+    later the same calendar day (mirrors Why's day-precision rule).
+    """
+    dt = _parse_iso_datetime(value)
+    if dt is None:
+        return None
+    if "T" not in value:
+        return dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return dt
+
+
 def _better_item(incumbent: Dict[str, Any], challenger: Dict[str, Any]) -> Dict[str, Any]:
     """Prefer higher score, then newer published, then incumbent (feed order wins)."""
     if challenger["score"] > incumbent["score"]:
@@ -149,32 +164,33 @@ def _better_item(incumbent: Dict[str, Any], challenger: Dict[str, Any]) -> Dict[
 
 
 def _parse_anthropic_ssr(html: str) -> List[Dict[str, Any]]:
-    """Extract post records from the Next.js SSR payload embedded in Anthropic page HTML.
+    """Extract listing-card posts from Anthropic Next.js Flight HTML.
 
-    The page embeds data as escaped JSON inside self.__next_f.push([1,"..."]) script tags.
-    Post objects always follow the field ordering: directories → illustration →
-    publishedOn → slug → subjects → summary → title. Date filtering happens in
-    the caller so an empty result means the payload shape changed, not a quiet week.
+    Listing objects are identified by ``slug: {_type: "slug", current: ...}``
+    plus ``summary`` (string or JSON null) / ``title``. Related-article cards use a slimmer
+    ``slug: {current: ...}`` shape and are ignored. Extra CMS fields
+    (``sensitive``, ``seoDescription``, ``subjects``, …) may sit between
+    ``publishedOn`` and ``slug``; the regex does not cross another
+    ``publishedOn`` so those cards cannot steal a listing's date. Every
+    ``<script>`` chunk is scanned because the listing payload is not always
+    in the first Flight push. Date filtering happens in the caller, so an
+    empty result means the payload shape changed, not a quiet week.
     """
-    # Find the script tag that holds publishedOn data
-    raw = ""
-    for script in re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL):
-        if "publishedOn" in script:
-            raw = script
-            break
-    if not raw:
+    raw = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL))
+    if "publishedOn" not in raw:
         return []
 
-    # Each post in the SSR payload serialises as (after the illustration block):
-    #   \"publishedOn\":\"DATE\",\"slug\":{\"_type\":\"slug\",\"current\":\"SLUG\"},
-    #   \"subjects\":[...],\"summary\":\"SUMMARY\",\"title\":\"TITLE\"
+    # Listing card (old and current CMS order), escaped inside __next_f.push:
+    #   \"publishedOn\":\"DATE\", …optional fields…,
+    #   \"slug\":{\"_type\":\"slug\",\"current\":\"SLUG\"},
+    #   …optional fields…, \"summary\":\"…\",\"title\":\"…\"
     post_re = re.compile(
-        r'\\"publishedOn\\":\\"([^\\"]+)\\"'               # group 1: publishedOn
-        r',\\"slug\\":{\\"_type\\":\\"slug\\"'
-        r',\\"current\\":\\"([^\\"]+)\\"}'                 # group 2: slug
-        r'.*?'                                             # subjects array (non-greedy)
-        r',\\"summary\\":\\"([^\\"]*)\\"'                  # group 3: summary
-        r',\\"title\\":\\"([^\\"]+)\\"',                   # group 4: title
+        r'\\"publishedOn\\":\\"([^\\"]+)\\"'
+        r'(?:(?!\\"publishedOn\\":).)*?'
+        r'\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"([^\\"]+)\\"}'
+        r'(?:(?!\\"publishedOn\\":).)*?'
+        r'\\"summary\\":(?:null|\\"([^\\"]*)\\")'
+        r',\\"title\\":\\"([^\\"]+)\\"',
         re.DOTALL,
     )
 
@@ -188,12 +204,17 @@ def _parse_anthropic_ssr(html: str) -> List[Dict[str, Any]]:
             continue
         seen_slugs.add(slug)
 
-        try:
-            datetime.fromisoformat(published_str.replace("Z", "+00:00"))
-        except ValueError:
+        if _anthropic_published_dt(published_str) is None:
             continue
 
-        posts.append({"slug": slug, "published": published_str, "title": title, "summary": summary})
+        posts.append(
+            {
+                "slug": slug,
+                "published": published_str,
+                "title": title.strip(),
+                "summary": (summary or "").strip(),
+            }
+        )
 
     return posts
 
@@ -533,13 +554,8 @@ class RssFetcher(BaseFetcher):
         stage_counts[source]["fetched"] = len(posts)
         items: List[Dict[str, Any]] = []
         for post in posts:
-            try:
-                published_dt = datetime.fromisoformat(
-                    post["published"].replace("Z", "+00:00")
-                )
-            except ValueError:
-                continue
-            if published_dt < cutoff:
+            published_dt = _anthropic_published_dt(post["published"])
+            if published_dt is None or published_dt < cutoff:
                 continue
             title: str = post["title"]
             summary: str = post["summary"]
