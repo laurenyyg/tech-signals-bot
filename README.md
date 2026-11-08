@@ -25,12 +25,13 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 │                    HOW  (decoupled)                      │
 │                                                          │
 │  Daily Catcher (catch_how.py)                           │
-│    ChatPRD + SSPAI → deduplicate → data/how_backlog.json│
+│    ChatPRD + SSPAI → dedupe vs backlog + seen ledger    │
+│    → fetch full article body → data/how_backlog.json    │
 │                         │                               │
 │  Weekly Synthesizer (main.py --profile how)             │
-│    Haiku bouncer: filter non-workflow articles           │
-│    → Sonnet formatter: structure into HowSignal JSON    │
-│    → Slack → clear backlog                              │
+│    Haiku bouncer on full body: PASS / NULL              │
+│    → one batched Sonnet call → HowSignal JSON           │
+│    → Slack → clear backlog, record URLs as seen         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -88,7 +89,7 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 A decoupled two-stage pipeline designed around the **Daily Catcher / Weekly Synthesizer** pattern (see below).
 
-**Sources**: ChatPRD "How I AI" page (JSON-LD scraping), SSPAI (RSS, filtered by author whitelist and keyword scoring).
+**Sources**: ChatPRD "How I AI" — each new episode's linked workflow pages, parsed from their schema.org `HowTo` JSON-LD (one backlog item per workflow); SSPAI (RSS, filtered by author whitelist and keywords; Latin keywords like `AI` match whole words only). For each new item the catcher downloads the page and stores the extracted article text, so the LLM reads the full piece rather than the feed blurb.
 
 **Schedule**: Catcher runs daily at 11:03 UTC. Synthesizer runs Saturdays at 9:27 AM PDT.
 
@@ -99,43 +100,39 @@ A decoupled two-stage pipeline designed around the **Daily Catcher / Weekly Synt
 The How pipeline uses a two-model cascade to minimise Sonnet token spend. Most articles in the backlog are lifestyle/opinion pieces that contain no replicable workflow — running them through Sonnet directly would be wasteful.
 
 ```
-Backlog item
+Backlog item (title + body extracted by the catcher via trafilatura)
     │
     ▼
-preprocess_article()          ← trafilatura strips HTML boilerplate
+Stage 1 — Haiku Bouncer       ← claude-haiku-4-5-20251001, max 1024 tokens, one call per item
+  First line: PASS or NULL.
+  PASS → tool stack, steps, outcome as plain text.
     │
-    ▼
-Stage 1 — Haiku Bouncer       ← claude-3-5-haiku-20241022, max 1024 tokens
-  "Does this article contain
-   an explicit step-by-step
-   AI workflow SOP? If not,
-   return NULL."
+    ├─ NULL ──► discard
     │
-    ├─ NULL ──► discard, log "[Cascade] Article X contains no structured workflow"
-    │
-    └─ workflow text ──►
+    └─ PASS ──► collect
+                    ▲
+ChatPRD HowTo items ┘  ← already structured workflows; skip the bouncer
           │
           ▼
-        Log: "[FinOps] Sonnet input size: N words. Cost significantly reduced!"
-          │
-          ▼
-Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens
-  Structures pre-filtered text
-  into HowSignal JSON:
-    tech_stack, workflow_steps,
-    roi_impact
+Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens, ONE batched call
+  Items referenced by numeric ID; returns
+  source_id, tech_stack, workflow_steps, roi_impact.
+  Title / source / URL resolved from metadata.
           │
           ▼
        Slack post
 ```
 
-**Every Slack message includes a FinOps footer** showing aggregate token usage across all Haiku + Sonnet calls in that run:
+**Failures are loud.** If every Stage 1 call errors (e.g. a retired model ID), or Stage 2 fails, the run posts a 🚨 alert instead of an empty digest. Individual Stage 1 errors appear in the funnel line, and those items stay in the backlog for up to 3 runs.
+
+**Every Slack message ends with a per-source funnel and a FinOps footer** aggregating all Haiku + Sonnet calls in the run (budget = sum of per-call output limits):
 
 ```
-_Model: claude-sonnet-4-6 | Tokens: 4821/16000 | Budget: OK_
+📡 ChatPRD   4 caught  ›  1 passed bouncer  ›  1 workflow(s)
+_Model: claude-haiku-4-5-20251001 + claude-sonnet-4-6 | Tokens: 16934/21120 | Budget: OK_
 ```
 
-The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. In a typical backlog of 20–40 articles, the majority are discarded at Stage 1.
+The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. The footer lists only the models actually called. Digests with more than 20 cards are split across several Slack messages to stay under Slack's 50-block limit.
 
 ---
 
@@ -151,10 +148,14 @@ The How pipeline separates **data collection** from **data processing** to avoid
 
 | Component | File | Runs | Does |
 |---|---|---|---|
-| Daily Catcher | `catch_how.py` | Daily (GitHub Actions) | Fetches ChatPRD + SSPAI, deduplicates by URL, appends to `data/how_backlog.json`, commits to repo. No LLM calls. |
-| Weekly Synthesizer | `main.py --profile how` | Saturdays | Reads the accumulated backlog, runs the Haiku→Sonnet cascade, posts to Slack, and **only if the Slack post succeeds**, overwrites the backlog with `[]`. |
+| Daily Catcher | `catch_how.py` | Daily (GitHub Actions) | Fetches the last 3 days of ChatPRD + SSPAI, skips URLs in the backlog or seen ledger, stores each new article's extracted body in `data/how_backlog.json`, commits to repo. No LLM calls. A failing source posts a 🚨 alert. |
+| Weekly Synthesizer | `main.py --profile how` | Saturdays | Reads the accumulated backlog, runs the Haiku→Sonnet cascade, posts to Slack, and **only if the Slack post succeeds**, clears the backlog and records processed URLs in `data/how_seen.json`. |
 
 The backlog is a plain JSON file committed to the repo by the catcher workflow. If the synthesizer fails (API error, Slack outage), the backlog is left untouched — all articles are retried next Saturday. No data is lost.
+
+The **seen ledger** (`data/how_seen.json`) stops articles from re-entering the backlog after the weekly reset (the 3-day fetch window overlaps the reset). Entries older than 60 days are pruned on every write, so the file stays small.
+
+For a one-off backfill (e.g. after an outage), run `venv/bin/python catch_how.py --days 14`, or trigger the **How Pipeline - Daily Catcher** workflow manually with `days` set to `14`.
 
 ---
 
@@ -162,6 +163,8 @@ The backlog is a plain JSON file committed to the repo by the catcher workflow. 
 
 ```
 main.py                   Entry point — --profile what|why|how
+common.py                 Shared helpers — Anthropic call, Slack post/footer, HTML extraction
+how_pipeline.py           How weekly synthesizer + backlog / seen-ledger state
 catch_how.py              How daily catcher (no LLM)
 config.py                 Shared constants (keywords, author lists, truncation)
 models.py                 Dataclasses: NewsSignal, WhySignal, HowSignal
@@ -177,6 +180,7 @@ fetchers/
 
 data/
   how_backlog.json        Persistent How backlog (committed by catcher CI)
+  how_seen.json           How seen-URL ledger, pruned to 60 days
 
 .github/workflows/
   what_pipeline.yml       Weekly What pipeline
@@ -185,7 +189,8 @@ data/
   how_synthesizer.yml     Weekly How synthesizer + backlog reset
 
 tests/
-  test_rss_fetcher.py     Unit tests (mocked XML, no live HTTP)
+  test_rss_fetcher.py     What dedupe unit tests (mocked XML, no live HTTP)
+  test_how.py             How parsers, filters, ledger, Slack payload (mocked, no live HTTP)
 ```
 
 ---
@@ -248,7 +253,7 @@ Add the following secrets to your repository under `Settings → Secrets and var
 | `ANTHROPIC_API_KEY` | All | Anthropic API key |
 | `WHAT_WEBHOOK_URL` | What | Slack incoming webhook |
 | `WHY_WEBHOOK_URL` | Why | Slack incoming webhook |
-| `HOW_WEBHOOK_URL` | How | Slack incoming webhook |
+| `HOW_WEBHOOK_URL` | How | Slack incoming webhook (used by both the synthesizer and the catcher's failure alerts) |
 | `STRATECHERY_RSS_URL` | Why | Private Stratechery article RSS URL |
 | `STRATECHERY_PODCAST_URL` | Why | Private Stratechery podcast RSS URL |
 | `GOOGLE_SPREADSHEET_ID` | What | Spreadsheet ID for source performance tracking |
