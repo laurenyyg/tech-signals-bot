@@ -53,9 +53,9 @@ A personal intelligence system that scrapes curated tech and AI sources, analyse
 4. Keyword score against `KEYWORD_WHITELIST` (ASCII whole-word match). Drop zero-score items.
 5. Drop URLs already posted (`data/what_seen.json`). Keep top 40 of the rest. An empty week still posts the digest (funnel + source errors, no Sonnet call). The ledger is updated only after a successful Slack post and committed by the workflow.
 
-**LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications.
+**LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications. Numeric `source_ids` are resolved to URLs after the call; unknown ids are dropped.
 
-**Post-run**: Per-source performance stats (fetched, in-window, relevant, sent-to-LLM) are appended to a Google Spreadsheet.
+**Post-run**: After Slack succeeds, per-source sieve stats (keyword-relevant, fetched, ratio) are appended to a Google Spreadsheet. A Sheets failure is logged and does not undo the post. The digest funnel links each source to its homepage; the FinOps footer links the spreadsheet.
 
 **Schedule**: Sundays at 22:47 UTC (2:47 PM PST / 3:47 PM PDT).
 
@@ -186,7 +186,7 @@ how_pipeline.py           How weekly synthesizer + backlog state
 seen_ledger.py            JSON state helpers + seen-URL ledger (How and Why), URL canonicalisation
 catch_how.py              How daily catcher (no LLM)
 config.py                 Shared constants (keywords, author lists, truncation)
-models.py                 Dataclasses: NewsSignal, WhySignal, HowSignal
+models.py                 Dataclasses: WhySignal, HowSignal
 prompts.py                LLM system prompts for all three profiles
 sheets_writer.py          What profile — Google Sheets source tracking
 

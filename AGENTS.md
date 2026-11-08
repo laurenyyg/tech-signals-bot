@@ -19,11 +19,12 @@
 - **Cross-feed dedupe**: Three passes in `rss_fetcher.py`: (1) normalised URL (strip `utm_*`, `fbclid`, `gclid`, etc.), (2) normalised title (strip `| TechCrunch` / `- Techmeme` style suffixes), (3) semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). Haiku must return every index `0..n-1` exactly once (`parse_semantic_groups`); invalid JSON, markdown fences that still fail to parse, a partial cover, or an out-of-range index logs a warning and keeps the pre-semantic list. On conflict across all passes: higher keyword score wins; tie-break newer `published`; if still tied, keep first-seen.
 - **Pre-filtering**: Date window from `fetch_cutoff()` in `main.py`: floor `WHAT_DAYS_FILTER` = 8 (one day of slack because scheduled runs start hours late). After a missed run the window stretches back to the last ledger `processed_at` minus `WHAT_DAYS_SLACK` (1), capped at `WHAT_DAYS_MAX` (14). An empty ledger uses the 8-day floor. Keyword scoring against `KEYWORD_WHITELIST` via `keyword_pattern()` (ASCII whole-word match, same helper as How; letter-hyphen compounds do not match the stem, so `meta` misses `meta-analysis` but `gpt` still hits `GPT-5`). Drop zero-score items after dedupe. Items already in `data/what_seen.json` are dropped before the top-40 cut (counted as "N already posted" in the funnel). Then keep the top 40 remaining. `source_counts["relevant"]` counts items with score > 0 per feed after dedup (before ledger/top-40); `source_counts["sent_to_llm"]` reflects the final top-40 batch.
 - **LLM input**: Title + stripped summary only. No URLs, no author, no content type. Items referenced by numeric ID.
-- **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
+- **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call (`resolve_source_urls`). Unknown ids and items with an empty link are dropped.
 - **Source health**: Each source runs in its own guard (`RssFetcher.source_errors`). A source fails when the request raises, the RSS feed has no entries, every entry fails to parse (no date/title — a format change), or an Anthropic SSR page yields no posts (regex/layout change). Failed sources are listed as ⚠️ lines in the digest; they do not abort the run. Items with no parsable date are skipped (counted toward the all-entries-failed check), never treated as in-window.
 - **Empty week**: If nothing survives scoring (and the ledger), Sonnet is skipped and the digest still posts (empty copy + ⚠️ + funnel) so source errors stay visible. Never `sys.exit(0)` on “no items”.
+- **Sheets** (`sheets_writer.py`): After Slack succeeds (including empty weeks), one Performance-tab row per source: keyword-relevant, fetched, ratio. Errors are logged and swallowed — a Sheets failure must not undo the Slack post or skip the ledger. `Relevant` is `source_counts["relevant"]` (score > 0 after dedupe), not Sonnet citations.
 - **Seen ledger** (`data/what_seen.json`): `{url, processed_at}` entries, pruned to `WHAT_SEEN_RETENTION_DAYS` (60) on every write. Key is `ledger_key()`: canonical link (`canonical_url()` in `seen_ledger.py`), else `source:title`. Updated **only after** a successful Slack post, with items sent to the LLM (Sonnet-dropped noise is not retried while still in window). The workflow commits the file.
-- **Funnel** (`funnel_line` / `funnel_lines` in `rss_fetcher.py`): one line per active source in `WHAT_SOURCES` order — `📡 *Source*   N fetched › N in last Nd › N relevant › N sent to LLM`, where `N` is the actual `window_days`. Notes for already posted. A source whose fetch failed shows `fetch failed` and is never folded. Feeds with `in_window == 0` collapse to one line: `📡 quiet: *Source*, …  (N fetched, 0 in window)`.
+- **Funnel** (`funnel_line` / `funnel_lines` in `rss_fetcher.py`): one line per active source in `WHAT_SOURCES` order — `📡 *Source*   N fetched › N in last Nd › N relevant › N sent to LLM`, where `N` is the actual `window_days`. Source names are Slack links (`SOURCE_HOME_URLS`). Notes for already posted. A source whose fetch failed shows `fetch failed` and is never folded. Feeds with `in_window == 0` collapse to one line: `📡 quiet: *Source*, …  (N fetched, 0 in window)`.
 
 ### Why Profile
 - **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win over podcasts; articles carry full text in RSS, podcast entries carry only a ~400-char episode description — no transcript), DeepLearning.AI (Andrew Ng letters, scraped from `/the-batch/tag/letters/`), Ben-Evans (essays + presentations), a16z (newsletter essays; announcements skipped via `a16z_skip_reason()`: posts tagged `A16Z_SKIP_TAGS` (`Fundraise`), titles starting with `A16Z_SKIP_TITLE_PREFIXES` ("Investing in", "Welcome", "Meet the", "Announcing", "Introducing", …), or mentioning "a16z"; lists in `config.py`), One Useful Thing (Ethan Mollick; public RSS).
@@ -65,6 +66,7 @@
 
 ## Slack Message Formatting
 - Every Slack post must include a FinOps footer: `_Model: [model_id] | Tokens: [total_used]/[max_tokens] | Budget: [OK/Hit]_`
+  - What also appends `| <spreadsheet|Sheets>` when `GOOGLE_SPREADSHEET_ID` is set.
   - `Budget: Hit` when `stop_reason == 'max_tokens'` (What), when any per-item call hits it (Why), or when any stage output tokens reach its limit (How cascade).
  - For Why, `total_used` is the aggregate over all per-item calls and `max_tokens` is `WHY_ITEM_MAX_TOKENS` × calls made.
   - If the pipeline crashes before the API call completes, show the model ID but use `N/A` for token counts.
@@ -76,7 +78,7 @@
 - 📰 **[Macro Event Name]**: `core_fact`
 - 🧠 **ELI5**: Simple mechanism breakdown.
 - 📈 **Second-Order Impact**: Infrastructure/long-term shift analysis.
-- ⚠️ lines for failed sources, then the per-source funnel (quiet feeds folded), before FinOps footer. An empty week still posts.
+- ⚠️ lines for failed sources, then the per-source funnel (quiet feeds folded, source names linked), then FinOps footer (Sheets link). An empty week still posts.
 
 ### Why Profile Visual Hierarchy
 - ❗️ Deep read (LLM-flagged) · 🧠 Standard essay · 🗂 Presentation · 🎙 Podcast
@@ -92,4 +94,4 @@
 - Empty backlog still posts ("No new items were caught this week.") so the weekly run is always visible.
 
 ## Testing
-- Tests must use local mocked XML strings — no live HTTP requests.
+- Tests must use local mocked XML/HTML strings — no live HTTP requests.
