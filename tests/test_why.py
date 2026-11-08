@@ -609,7 +609,7 @@ def test_build_why_slack_payloads_layout() -> None:
     blocks = payloads[0]["blocks"]
     assert blocks[0]["type"] == "header" and "(1/" not in blocks[0]["text"]["text"]
     sections = [b["text"]["text"] for b in blocks if b["type"] == "section"]
-    assert sections[0].startswith("❗️ *Deep* — _A_ · Nov 7")
+    assert sections[0].startswith("❗️ *Deep* — _a16z_ · Nov 7")
     assert sections[0].endswith("• _<https://x/Deep|Read essay>_")
     assert sections[1].startswith("🎙 *Pod*") and "Read transcript" in sections[1]
     assert "`[Presentation]`" in sections[2] and "Find out more" in sections[2]
@@ -647,3 +647,13 @@ def test_build_why_slack_payloads_month_only_date() -> None:
     }
     section = build_why_slack_payloads([signal])[0]["blocks"][2]["text"]["text"]
     assert "· Nov 2026" in section
+
+
+def test_card_header_names_publication_not_writer() -> None:
+    signal = {
+        **_item("Aggregators"), "source": "stratechery", "feed": "stratechery",
+        "author": "Ben Thompson", "summary": ["x"],
+    }
+    section = build_why_slack_payloads([signal])[0]["blocks"][2]["text"]["text"]
+    assert section.startswith("🧠 *Aggregators* — _Stratechery_ · ")
+    assert "Ben Thompson" not in section

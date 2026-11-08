@@ -3,10 +3,10 @@
 You are helping maintain this **Python** repo (RSS → Anthropic → Slack). Prefer **functional, modular** code and match existing style in each file.
 
 ## Stack and patterns (this project)
-- **Python 3** only here; use **type hints** on new/changed functions per `CLAUDE.md`.
+- **Python 3** only here; use **type hints** on new/changed functions per `AGENTS.md`.
 - Prefer the **stdlib + existing deps** (`feedparser`, `anthropic`, `requests`, `dotenv`); do not add dependencies without a clear need.
 - Use **`logging`** (module-level `logger = logging.getLogger(__name__)`) for diagnostics—not `print` or `console.log`. Reuse the project log format when touching entrypoints.
-- **Errors**: follow `CLAUDE.md`—fetchers and LLM calls use `try`/`except`; critical failures should surface clearly (including Slack error payloads where the pipeline already does so).
+- **Errors**: follow `AGENTS.md`—fetchers and LLM calls use `try`/`except`; critical failures should surface clearly (including Slack error payloads where the pipeline already does so).
 - **Concurrency**: the codebase is largely **synchronous**; do not introduce `async`/`await` unless there is a concrete I/O win and you refactor consistently.
 
 ## Secrets and configuration
@@ -19,8 +19,8 @@ You are helping maintain this **Python** repo (RSS → Anthropic → Slack). Pre
 ## AI assistant behavior
 - Be concise; skip textbook explanations unless asked.
 - For non-trivial new files, **state where they live** (e.g. under `fetchers/`, `tests/`) so the tree stays obvious.
-- **Composer (`Cmd+I`)**: keep **multi-file edits consistent** (imports, types, `CLAUDE.md` / `README` when behavior changes).
+- **Composer (`Cmd+I`)**: keep **multi-file edits consistent** (imports, types, `AGENTS.md` / `README` when behavior changes).
 - During informal (“vibe”) coding, **fix obvious syntax/type errors** without asking for permission.
 
 ## Source of truth
-- Pipeline specifics (profiles, dedupe, Slack footers, test policy) live in **`CLAUDE.md`**. Do not contradict it; update it when behavior changes.
+- Pipeline specifics (profiles, dedupe, Slack footers, test policy) live in **`AGENTS.md`**. Do not contradict it; update it when behavior changes.

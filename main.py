@@ -4,7 +4,7 @@ Tech Signals Bot — main entry point.
 Usage:
     venv/bin/python main.py --profile what
 
-Note: CLAUDE.md specified claude-3-7-sonnet-20250219, which was retired
+Note: the project conventions (now AGENTS.md) specified claude-3-7-sonnet-20250219, which was retired
 Feb 19 2026. Using claude-sonnet-4-6 with adaptive thinking instead.
 """
 import argparse
