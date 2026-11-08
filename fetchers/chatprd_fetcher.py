@@ -199,6 +199,7 @@ class ChatPRDFetcher(BaseFetcher):
                 "source": "ChatPRD",
                 "episode": episode["link"],
                 "body": parsed["body"],
+                "kind": "howto",
             })
         return items or [episode]
 

@@ -28,16 +28,22 @@ Each input item is prefixed with a numeric ID in square brackets (e.g. "[1]").
 
 FIELD INSTRUCTIONS:
 - `source_id`: The numeric ID of the input item this workflow came from.
-- `tech_stack`: List the specific tools, APIs, or platforms used (e.g., Cursor, GitHub Actions, Claude API). \
-  Be precise — "AI" is not a tool, "Claude API" is.
+- `tech_stack`: List the specific named products, APIs, or platforms used (e.g., Cursor, GitHub Actions, \
+  Claude API). Be precise — "AI" is not a tool, "Claude API" is. List each product once: fold \
+  integrations into their product (write "ElevenLabs", not "ElevenLabs, ElevenLabs MCP"). \
+  Exclude generic categories and formats such as CRM, email, Git, Markdown, or "browser agent" \
+  unless a specific product is named (e.g., "Salesforce", "Gmail", "GitHub").
 - `workflow_steps`: A strict ELI5 step-by-step SOP. Exactly 3 steps: \
   Step 1 is the Trigger (what starts the process), \
   Step 2 is the Process (what the automation/AI does), \
   Step 3 is the Output (what the human receives). \
   Keep each step under 40 words.
-- `roi_impact`: One sentence naming the concrete pain point solved and the measurable gain \
-  (e.g., "Saved 5 hours a week on PR reviews", "Shipped 44 PRs in 5 days without a QA team"). \
-  Only use figures stated in the input; if none are given, state the gain qualitatively.
+- `roi_impact`: One plain sentence grounded in what the input actually states — its "Outcome" \
+  line, description, or reported results. Name the problem it addresses and what the user gets. \
+  Include figures only if the input states them (e.g., "Saved 5 hours a week on PR reviews"). \
+  Do NOT claim the workflow "eliminates", "replaces", or "automates away" work unless the input \
+  says so, and do not generalise beyond the source (an agent that "catches edge cases a busy \
+  human might miss" does not "eliminate manual testing").
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array — no markdown fences, no preamble, no commentary. \
@@ -47,7 +53,7 @@ Each element must match this schema exactly:
     "source_id": <id>,
     "tech_stack": ["<tool>", "..."],
     "workflow_steps": ["Step 1: <Trigger>", "Step 2: <Process>", "Step 3: <Output>"],
-    "roi_impact": "<concrete pain point and measurable gain>"
+    "roi_impact": "<source-grounded problem and outcome>"
   }
 ]
 

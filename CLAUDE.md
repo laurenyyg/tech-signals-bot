@@ -32,9 +32,9 @@
 - **ChatPRD source**: Parses `PodcastSeries.hasPart` (`PodcastEpisode`) JSON-LD on the How I AI page (legacy `blogPost` shape as fallback; raises if neither is present). For each in-window episode, follows its `/how-i-ai/workflows/<slug>` links and emits **one backlog item per workflow page**, with `body` rendered from the page's schema.org `HowTo` JSON-LD (tools, inputs, numbered steps, outcome) and `episode` set to the parent episode URL. Episodes with no workflow links (or whose workflow pages all fail) fall back to a single episode item.
 - **SSPAI filter**: Author whitelist takes priority; otherwise, items must match `HOW_POSITIVE_KEYWORDS` and not match `HOW_NEGATIVE_KEYWORDS` (defined in `config.py`). ASCII keywords (`AI`, `API`, …) match as whole words, case-insensitive; CJK keywords match as substrings. Raises if the feed returns no entries.
 - **Weekly Synthesizer** (`main.py --profile how` → `how_pipeline.run_how_pipeline`): Reads the backlog and runs a two-stage LLM cascade:
- - **Stage 1 — Haiku Bouncer** (`claude-haiku-4-5-20251001`, max 1024 tokens, one call per item): Input is title + `body` (re-fetched if empty, falling back to the feed summary). First output line is `PASS` or `NULL` (prefix match, so `NULL.` counts); `PASS` is followed by tool stack, steps, and outcome as plain text.
- - **Stage 2 — Sonnet Formatter** (`claude-sonnet-4-6`, max 16,000 tokens, with thinking): **One batched call** over all passing items, referenced by numeric ID. Returns `source_id` + `tech_stack`, `workflow_steps`, `roi_impact`; title, source, and URL are resolved from metadata.
- - **Failure policy**: If every Stage 1 call errors, or Stage 2 errors or returns invalid JSON, the run raises and posts a 🚨 alert. Individual Stage 1 errors are shown in the funnel line; those items stay in the backlog for retry (up to `MAX_ATTEMPTS` = 3 runs).
+ - **Stage 1 — Haiku Bouncer** (`claude-haiku-4-5-20251001`, max 1024 tokens, one call per item): Input is title + `body` (re-fetched if empty, falling back to the feed summary). First output line is `PASS` or `NULL` (prefix match, so `NULL.` counts); `PASS` is followed by tool stack, steps, and outcome as plain text. **Skipped** for pre-structured items (`kind == "howto"`, i.e. ChatPRD workflow pages), whose `body` goes straight to Stage 2.
+ - **Stage 2 — Sonnet Formatter** (`claude-sonnet-4-6`, max 16,000 tokens, with thinking): **One batched call** over all passing items, referenced by numeric ID. Returns `source_id` + `tech_stack`, `workflow_steps`, `roi_impact`; title, source, and URL are resolved from metadata. `tech_stack` is named products only (integrations folded into their product, no generic categories); `dedupe_tools()` also drops case-insensitive duplicates and `X MCP` when `X` is listed. `roi_impact` must be grounded in the source's stated outcome/results — no "eliminates"/"replaces" claims or figures the source doesn't state.
+ - **Failure policy**: If Stage 2 errors or returns invalid JSON, or every Stage 1 call errors and nothing else passed, the run raises and posts a 🚨 alert. Individual Stage 1 errors are shown in the funnel line; those items stay in the backlog for retry (up to `MAX_ATTEMPTS` = 3 runs).
  - **State update**: **Only if** the Slack post succeeds, the backlog is rewritten to just the retry items and processed URLs are appended to `data/how_seen.json`. Failed runs leave both files untouched.
 - **Seen ledger** (`data/how_seen.json`): `{url, processed_at}` entries, pruned to `HOW_SEEN_RETENTION_DAYS` (60) on every write. Prevents items from re-entering the backlog after the weekly reset. Retention must stay well above `HOW_DAYS_FILTER`.
 
@@ -57,7 +57,7 @@
 - Every Slack post must include a FinOps footer: `_Model: [model_id] | Tokens: [total_used]/[max_tokens] | Budget: [OK/Hit]_`
   - `Budget: Hit` when `stop_reason == 'max_tokens'` (What/Why) or when any stage output tokens reach its limit (How cascade).
   - If the pipeline crashes before the API call completes, show the model ID but use `N/A` for token counts.
-  - For the How cascade, `model_id` is `claude-haiku-4-5-20251001 + claude-sonnet-4-6`, `total_used` is the aggregate of all Haiku + Sonnet calls in that run, and `max_tokens` is the sum of the per-call output budgets for the calls made.
+  - For the How cascade, `model_id` lists the models actually called in the run (e.g. `claude-haiku-4-5-20251001 + claude-sonnet-4-6`, or just `claude-sonnet-4-6` when every item was pre-structured), `total_used` is the aggregate of all Haiku + Sonnet calls in that run, and `max_tokens` is the sum of the per-call output budgets for the calls made.
 - If the pipeline crashes, send a 🚨 Alert block to Slack with the exception details.
 
 ### What Profile Visual Hierarchy
@@ -75,7 +75,8 @@
 - 🛠️ **Tech Stack**: comma-separated tool list.
 - 📝 **Workflow SOP**: 3 bullet points (Step 1: Trigger, Step 2: Process, Step 3: Output).
 - 💰 **ROI/Impact**: one sentence with concrete pain point and measurable gain.
-- Funnel line per source before FinOps footer: `N caught › N passed bouncer › N workflow(s)`, plus `(N errored)` when Stage 1 calls failed.
+- Funnel line per source before FinOps footer: `N caught › N passed bouncer › N workflow(s)`, plus `(N pre-structured, not bounced)` for HowTo items and `(N errored)` when Stage 1 calls failed.
+- More than 20 cards are split across multiple Slack messages (`(1/N)` in the header) to stay under Slack's 50-block limit; funnel and footer go on the last message. If a later message fails, state is left intact, so earlier messages may be re-posted on retry.
 - Empty backlog still posts ("No new items were caught this week.") so the weekly run is always visible.
 
 ## Testing

@@ -110,6 +110,8 @@ Stage 1 — Haiku Bouncer       ← claude-haiku-4-5-20251001, max 1024 tokens, 
     ├─ NULL ──► discard
     │
     └─ PASS ──► collect
+                    ▲
+ChatPRD HowTo items ┘  ← already structured workflows; skip the bouncer
           │
           ▼
 Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens, ONE batched call
@@ -130,7 +132,7 @@ Stage 2 — Sonnet Formatter    ← claude-sonnet-4-6, max 16,000 tokens, ONE ba
 _Model: claude-haiku-4-5-20251001 + claude-sonnet-4-6 | Tokens: 16934/21120 | Budget: OK_
 ```
 
-The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens.
+The Haiku stage acts as a cheap cognitive filter — only articles that survive it consume Sonnet tokens. The footer lists only the models actually called. Digests with more than 20 cards are split across several Slack messages to stay under Slack's 50-block limit.
 
 ---
 

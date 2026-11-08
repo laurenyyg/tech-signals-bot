@@ -12,8 +12,10 @@ from fetchers.chatprd_fetcher import (
     parse_howto_page,
 )
 from fetchers.sspai_fetcher import parse_sspai_feed, passes_how_filter
+import how_pipeline
 from how_pipeline import (
-    build_how_slack_payload,
+    build_how_slack_payloads,
+    dedupe_tools,
     known_urls,
     mark_seen,
     parse_bouncer_verdict,
@@ -284,43 +286,108 @@ def test_known_urls_combines_backlog_and_ledger() -> None:
 # Slack payload
 # ---------------------------------------------------------------------------
 
-def _all_text(payload: Dict[str, Any]) -> str:
+def _all_text(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def test_payload_with_signals_has_funnel_and_footer() -> None:
-    signals = [{
-        "title": "A", "source": "ChatPRD", "url": "https://a",
+def _signal(title: str = "A") -> Dict[str, Any]:
+    return {
+        "title": title, "source": "ChatPRD", "url": f"https://{title}",
         "tech_stack": ["Cursor"], "workflow_steps": ["Step 1: x"], "roi_impact": "saved time",
-    }]
-    funnel = {"ChatPRD": {"caught": 4, "passed": 1, "workflows": 1, "errored": 1}}
-    payload = build_how_slack_payload(signals, funnel, total_tokens=100, budget_status="OK", max_tokens=5000)
-    text = _all_text(payload)
-    assert "4 caught" in text and "1 passed bouncer" in text and "(1 errored)" in text
+    }
+
+
+def test_payload_with_signals_has_funnel_and_footer() -> None:
+    funnel = {"ChatPRD": {"caught": 4, "passed": 3, "structured": 2, "workflows": 3, "errored": 1}}
+    payloads = build_how_slack_payloads([_signal()], funnel, total_tokens=100, budget_status="OK", max_tokens=5000)
+    assert len(payloads) == 1
+    text = _all_text(payloads[0])
+    assert "4 caught" in text and "3 passed bouncer" in text and "(1 errored)" in text
+    assert "(2 pre-structured, not bounced)" in text
     assert "Tokens: 100/5000" in text
     assert "claude-haiku-4-5-20251001 + claude-sonnet-4-6" in text
     assert "Read more" in text
 
 
 def test_payload_truncates_long_sections() -> None:
-    signals = [{
-        "title": "A", "source": "ChatPRD", "url": "https://a",
-        "tech_stack": [], "workflow_steps": ["x" * 5000], "roi_impact": "",
-    }]
-    payload = build_how_slack_payload(signals, {}, total_tokens=1, budget_status="OK")
-    sections = [b for b in payload["blocks"] if b["type"] == "section"]
+    signal = {**_signal(), "workflow_steps": ["x" * 5000]}
+    payloads = build_how_slack_payloads([signal], {}, total_tokens=1, budget_status="OK")
+    sections = [b for b in payloads[0]["blocks"] if b["type"] == "section"]
     assert all(len(s["text"]["text"]) <= 3000 for s in sections)
     assert "Read more" in sections[0]["text"]["text"]
 
 
+def test_payload_splits_across_messages_under_block_limit() -> None:
+    signals = [_signal(f"s{i}") for i in range(45)]
+    funnel = {"ChatPRD": {"caught": 45, "passed": 45, "workflows": 45}}
+    payloads = build_how_slack_payloads(signals, funnel, total_tokens=1, budget_status="OK")
+    assert len(payloads) == 3
+    assert all(len(p["blocks"]) <= 50 for p in payloads)
+    assert "(1/3)" in payloads[0]["text"] and "(3/3)" in payloads[2]["text"]
+    cards = sum(1 for p in payloads for b in p["blocks"] if b["type"] == "section")
+    assert cards == 45
+    assert "Model:" not in _all_text(payloads[0]) and "45 caught" not in _all_text(payloads[0])
+    assert "Model:" in _all_text(payloads[2]) and "45 caught" in _all_text(payloads[2])
+
+
 def test_payload_empty_backlog_message() -> None:
-    payload = build_how_slack_payload([], {}, total_tokens=0, budget_status="OK")
-    assert "No new items were caught" in _all_text(payload)
+    payloads = build_how_slack_payloads([], {}, total_tokens=0, budget_status="OK")
+    assert "No new items were caught" in _all_text(payloads)
 
 
 def test_payload_no_workflows_message() -> None:
     funnel = {"SSPAI": {"caught": 3, "passed": 0}}
-    payload = build_how_slack_payload([], funnel, total_tokens=10, budget_status="OK")
-    text = _all_text(payload)
+    text = _all_text(build_how_slack_payloads([], funnel, total_tokens=10, budget_status="OK"))
     assert "No replicable AI tool workflows" in text
     assert "3 caught" in text
+
+
+# ---------------------------------------------------------------------------
+# Tool cleanup
+# ---------------------------------------------------------------------------
+
+def test_dedupe_tools_folds_mcp_and_duplicates() -> None:
+    assert dedupe_tools(["ElevenLabs", "ElevenLabs MCP", "claude", "Claude", " ", "Figma MCP"]) == [
+        "ElevenLabs", "claude", "Figma MCP",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline (LLM + Slack mocked)
+# ---------------------------------------------------------------------------
+
+def test_pipeline_skips_bouncer_for_howto_items(tmp_path: Any, monkeypatch: Any) -> None:
+    backlog_file = tmp_path / "how_backlog.json"
+    seen_file = tmp_path / "how_seen.json"
+    backlog_file.write_text(json.dumps([
+        {"title": "HowTo", "link": "https://howto", "source": "ChatPRD",
+         "kind": "howto", "body": "Tools: Codex\nSteps:\n1. Do it"},
+        {"title": "Post", "link": "https://post", "source": "SSPAI", "body": "some article"},
+    ]))
+    monkeypatch.setattr(how_pipeline, "BACKLOG_FILE", str(backlog_file))
+    monkeypatch.setattr(how_pipeline, "SEEN_FILE", str(seen_file))
+
+    calls: List[str] = []
+
+    def fake_claude(model_id: str, system: str, user_message: str, max_tokens: int,
+                    use_thinking: bool = False) -> Any:
+        calls.append(model_id)
+        if model_id == how_pipeline.HAIKU_MODEL_ID:
+            assert "some article" in user_message
+            return "NULL", 10, 1, "end_turn"
+        assert "[1] Title: HowTo" in user_message and "Post" not in user_message
+        return json.dumps([{"source_id": 1, "tech_stack": ["Codex"],
+                            "workflow_steps": ["Step 1: x"], "roi_impact": "y"}]), 20, 5, "end_turn"
+
+    posted: List[Dict[str, Any]] = []
+    monkeypatch.setattr(how_pipeline, "call_claude_raw", fake_claude)
+    monkeypatch.setattr(how_pipeline, "post_to_slack", lambda url, p: posted.append(p))
+
+    meta: Dict[str, Any] = {}
+    how_pipeline.run_how_pipeline("https://hook", meta)
+
+    assert calls == [how_pipeline.HAIKU_MODEL_ID, how_pipeline.MODEL_ID]
+    assert len(posted) == 1 and "HowTo" in _all_text(posted)
+    assert meta["total_tokens"] == 36
+    assert json.loads(backlog_file.read_text()) == []
+    assert {e["url"] for e in json.loads(seen_file.read_text())} == {"https://howto", "https://post"}
