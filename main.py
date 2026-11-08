@@ -26,6 +26,7 @@ from common import (
     configure_logging,
     context_blocks,
     date_range_str,
+    fit_text,
     post_payloads,
     post_to_slack,
     section_block,
@@ -33,7 +34,11 @@ from common import (
     strip_html,
 )
 from config import SUMMARY_TRUNCATE_CHARS
-from fetchers.rss_fetcher import DAYS_FILTER as WHAT_DAYS_FILTER, RssFetcher
+from fetchers.rss_fetcher import (
+    DAYS_FILTER as WHAT_DAYS_FILTER,
+    RssFetcher,
+    funnel_lines,
+)
 from how_pipeline import FOOTER_MODEL_LABEL as HOW_FOOTER_MODEL_LABEL, run_how_pipeline
 from prompts import WHAT_PROFILE_PROMPT
 from sheets_writer import append_what_run, compute_relevant_per_source
@@ -144,18 +149,14 @@ def build_slack_payloads(
     source_counts: Optional[Dict[str, Dict[str, int]]] = None,
     total_tokens: Optional[int] = None,
     budget_status: Optional[str] = None,
+    source_errors: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build the What digest as one or more Slack messages (see split_into_messages)."""
-    footer_blocks = context_blocks([f"\n{build_footer(total_tokens, budget_status)}"])
+    """Build the What digest as one or more Slack messages (see split_into_messages).
 
-    if not signals:
-        return [{
-            "text": "Tech Signals Digest — no significant signals detected.",
-            "blocks": [
-                section_block("_No structurally significant signals detected in today's feed._"),
-                *footer_blocks,
-            ],
-        }]
+    Cards come first; source-error warnings, the per-source funnel, and the
+    FinOps footer go on the last message.
+    """
+    footer_blocks = context_blocks([f"\n{build_footer(total_tokens, budget_status)}"])
 
     groups: List[List[Block]] = []
     for signal in signals:
@@ -174,19 +175,24 @@ def build_slack_payloads(
             lines.append(f"_Sources: {links}_")
 
         groups.append([section_block("\n".join(lines)), {"type": "divider"}])
+    if not signals:
+        groups.append([section_block(
+            "_No structurally significant signals detected in today's feed._"
+        )])
 
-    funnel_lines = [
-        f"📡 *{source.capitalize()}*   "
-        f"{counts.get('fetched', 0)} fetched  ›  "
-        f"{counts.get('in_window', 0)} in last {WHAT_DAYS_FILTER}d  ›  "
-        f"{counts.get('relevant', 0)} relevant  ›  "
-        f"{counts.get('sent_to_llm', 0)} sent to LLM"
-        for source, counts in (source_counts or {}).items()
+    warnings = [
+        f"⚠️ *{source}* fetch failed: {fit_text(' '.join(error.split()), 200)}"
+        for source, error in (source_errors or {}).items()
     ]
+    tail = (
+        context_blocks(warnings)
+        + context_blocks(funnel_lines(source_counts or {}))
+        + footer_blocks
+    )
     return split_into_messages(
         f"Tech Signals Digest — {len(signals)} signal(s) | {date_range_str(WHAT_DAYS_FILTER)}",
         groups,
-        context_blocks(funnel_lines) + footer_blocks,
+        tail,
     )
 
 
@@ -226,11 +232,26 @@ def main() -> None:
         items: List[Dict[str, Any]] = fetcher.fetch()
         logger.info(f"Profile '{args.profile}': {len(items)} scored items ready for LLM")
 
-        if not items:
-            logger.warning("No items fetched — nothing to analyse.")
-            sys.exit(0)
-
         source_counts: Dict[str, Dict[str, int]] = getattr(fetcher, "source_counts", {})
+        source_errors: Dict[str, str] = getattr(fetcher, "source_errors", {})
+
+        webhook_url = os.getenv(profile["webhook_env"])
+        if not webhook_url:
+            raise EnvironmentError(
+                f"{profile['webhook_env']} is not set in the environment"
+            )
+
+        if not items:
+            logger.warning("No scored items — posting empty digest.")
+            payloads = build_slack_payloads(
+                [],
+                source_counts=source_counts,
+                source_errors=source_errors,
+                total_tokens=0,
+                budget_status="OK",
+            )
+            post_payloads(webhook_url, payloads, post=post_to_slack)
+            return
 
         # 2. Analyse
         signals, usage_meta = call_anthropic(
@@ -256,15 +277,13 @@ def main() -> None:
             relevant_per_source = compute_relevant_per_source(signals, items)
             append_what_run(source_counts, relevant_per_source)
 
-        # 3. Format
-        payloads = build_slack_payloads(signals, source_counts=source_counts, **usage_meta)
-
-        # 4. Post to Slack
-        webhook_url = os.getenv(profile["webhook_env"])
-        if not webhook_url:
-            raise EnvironmentError(
-                f"{profile['webhook_env']} is not set in the environment"
-            )
+        # 3. Format and post
+        payloads = build_slack_payloads(
+            signals,
+            source_counts=source_counts,
+            source_errors=source_errors,
+            **usage_meta,
+        )
         post_payloads(webhook_url, payloads, post=post_to_slack)
 
     except Exception as exc:

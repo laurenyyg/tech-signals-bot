@@ -1,6 +1,6 @@
 # Tech Signals Bot
 
-A personal intelligence system that scrapes curated tech, crypto, and AI sources, analyses them with Claude, and posts dense signal digests to Slack. Three pipelines answer three distinct questions: **What** happened, **Why** it matters, and **How** people are actually using AI tools.
+A personal intelligence system that scrapes curated tech and AI sources, analyses them with Claude, and posts dense signal digests to Slack. Three pipelines answer three distinct questions: **What** happened, **Why** it matters, and **How** people are actually using AI tools.
 
 ---
 
@@ -44,19 +44,20 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 **Sources**: Techmeme, TechCrunch, OpenAI News via RSS; Anthropic news and research via SSR HTML scraping.
 
 **Pre-LLM pipeline**:
-1. Fetch all feeds → raw items
-2. Three-pass cross-feed deduplication:
+1. Fetch all feeds → raw items. A source that errors, returns no entries, whose entries all fail to parse, or whose Anthropic SSR page has no posts is reported as a ⚠️ line instead of being silently skipped.
+2. Drop items outside the 7-day window. Items without a parsable date are skipped.
+3. Three-pass cross-feed deduplication:
    - Pass 1: Normalised URL (strips `utm_*`, `fbclid`, `gclid` params)
-   - Pass 2: Normalised title (strips ` | TechCrunch`, ` - CoinDesk`-style suffixes)
-   - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement)
-3. Keyword score against `KEYWORD_WHITELIST`. Drop zero-score items.
-4. Keep top 40 by score.
+   - Pass 2: Normalised title (strips ` | TechCrunch`, ` - Techmeme`-style suffixes)
+   - Pass 3: Semantic dedup via `claude-haiku-4-5-20251001` — groups titles covering the same event (e.g. Techmeme vs TechCrunch on the same announcement). Invalid or partial index covers are ignored; the pre-semantic list is kept.
+4. Keyword score against `KEYWORD_WHITELIST` (ASCII whole-word match). Drop zero-score items.
+5. Keep top 40 by score. An empty week still posts the digest (funnel + source errors, no Sonnet call).
 
 **LLM call**: Title + stripped summary only (no URLs). Claude clusters related items and extracts paradigm-shifting signals: macro event, core fact, ELI5 mechanism, and second-order infrastructure implications.
 
 **Post-run**: Per-source performance stats (fetched, in-window, relevant, sent-to-LLM) are appended to a Google Spreadsheet.
 
-**Schedule**: Sundays at 8:47 PM Vancouver time.
+**Schedule**: Sundays at 22:47 UTC (2:47 PM PST / 3:47 PM PDT).
 
 ---
 
