@@ -22,10 +22,13 @@
 - **LLM output**: Clustered signals with `source_ids` — resolved back to URLs from metadata after the API call.
 
 ### Why Profile
-- **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win over podcasts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z (newsletter essays; skips posts whose title starts with "Investing in"), One Useful Thing (Ethan Mollick; public RSS).
-- **Pre-filtering**: 7-day date window only. No scoring, no top-N cap.
-- **Deep-read flagging**: The LLM determines `is_deep_read` from content. The fetcher also computes a keyword scan against `DEEP_READ_KEYWORDS` in `config.py` (`needs_deep_read` field) but this is not currently passed to the LLM — the LLM judges independently.
-- **LLM input**: Title, author, content type, summary (full article/transcript body, truncated to 1500 chars via `SUMMARY_TRUNCATE_CHARS` in `config.py`), and URL included. 1-to-1 mapping (no clustering).
+- **Sources**: Stratechery (articles + podcast via private RSS; deduplicated by title, articles win over podcasts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z (newsletter essays; announcements skipped via `a16z_skip_reason()`: posts tagged `A16Z_SKIP_TAGS` (`Fundraise`), titles starting with `A16Z_SKIP_TITLE_PREFIXES` ("Investing in", "Welcome", "Meet the", "Announcing", "Introducing", …), or mentioning "a16z"; lists in `config.py`), One Useful Thing (Ethan Mollick; public RSS).
+- **Pre-filtering**: 8-day date window (`DAYS_FILTER` in `why_fetcher.py`; one day of slack because scheduled runs start hours late). No scoring, no top-N cap. Items with no parsable date are skipped as parse errors, never passed through. Human dates are ranges (`parse_human_date_range`): a day-precision date is in window if that day ends after the cutoff; a month-only date ("Nov 2026", Ben Evans presentations) stays in window for the whole month and is shown as `Nov 2026` (`date_precision: "month"`).
+- **Seen ledger** (`data/why_seen.json`): `{url, processed_at}` entries, pruned to `WHY_SEEN_RETENTION_DAYS` (60) on every write; must exceed the window plus a full month. Items already in the ledger are dropped before the LLM (noted as "N already posted, skipped" in the counts line). Key is `ledger_key()`: canonical RSS `guid` (WordPress-permanent), else canonical link, else `source:title`. `canonical_url()` (in `seen_ledger.py`, shared with How) drops `access_token` and tracking params but keeps identifying ones like `?p=20955` — **Stratechery tokens must never reach the committed ledger**. Updated **only after** a successful Slack post, with summarised items only (failed items are retried next run while still in window). The workflow commits the file.
+- **Source health**: Each source runs in its own guard. A source fails (recorded in `WhyFetcher.source_errors`) when the request or parse raises, the feed/page has no entries or cards, or every entry fails to parse (e.g. a date-format or API-shape change). Failed sources are listed as ⚠️ lines in the digest; they do not abort the run.
+- **Parsers**: Pure functions (`parse_rss_feed`, `parse_deeplearning_ai_page`, `parse_ben_evans_page`, `parse_a16z_archive`, `parse_human_date`) so they can be tested on mocked strings. Ben Evans dates are day-first (`3 September 2026`, `Sept 2026`); the a16z archive returns `{"posts": [...], "nextCursor": ...}` and `truncated_body_text` is preferred over `description`.
+- **LLM calls** (`why_pipeline.py`): **One Sonnet call per item** (max `WHY_ITEM_MAX_TOKENS` = 8000 output tokens each, with thinking). Input is title, author, content type, and text (HTML-stripped, truncated to `SUMMARY_TRUNCATE_CHARS`). Output is a JSON object with only `summary` (bullets) and `is_deep_read`; title, author, date, type, and URL come from fetcher metadata.
+- **Failure policy**: An item whose call errors, hits its token budget, or returns invalid JSON is dropped and listed as "⚠️ Not summarised" in the digest. The run raises (🚨 alert) only if every item fails. A week with no items still posts the empty digest so source errors stay visible.
 
 ### How Profile (Decoupled)
 - **Daily Catcher** (`catch_how.py`): Fetches ChatPRD and SSPAI items published in the last `HOW_DAYS_FILTER` (3) days (`--days N` for a one-off backfill). Skips URLs already in the backlog or the seen ledger, downloads each new page and stores its extracted text (`fetch_body()` → `preprocess_article()`, truncated to `HOW_BODY_MAX_CHARS`) as `body`, and appends to `data/how_backlog.json`. No LLM calls. Each source runs in its own `try`; a failing source posts a 🚨 alert to `HOW_WEBHOOK_URL` and the other source still runs. Exits non-zero only if every source fails. Runs daily via GitHub Actions and commits the backlog and ledger.
@@ -45,7 +48,7 @@
 
 ## LLM Configuration
 - **Primary model**: `claude-sonnet-4-6` — used for What, Why, and How Stage 2.
-- **Thinking**: `{"type": "adaptive"}` — enabled for What, Why, and How Stage 2 (Sonnet only; not supported by Haiku).
+- **Thinking**: `{"type": "adaptive"}` — enabled for What, Why (per item), and How Stage 2 (Sonnet only; not supported by Haiku).
 - **Max tokens**: 16,000 output token budget for Sonnet calls.
 - **Haiku (What dedup)**: `claude-haiku-4-5-20251001` — semantic cross-feed deduplication only.
 - **Haiku (How bouncer)**: `claude-haiku-4-5-20251001` — Stage 1 cognitive filter, max 1024 output tokens. (`claude-3-5-haiku-20241022` is retired and returns 404.)
@@ -55,7 +58,8 @@
 
 ## Slack Message Formatting
 - Every Slack post must include a FinOps footer: `_Model: [model_id] | Tokens: [total_used]/[max_tokens] | Budget: [OK/Hit]_`
-  - `Budget: Hit` when `stop_reason == 'max_tokens'` (What/Why) or when any stage output tokens reach its limit (How cascade).
+  - `Budget: Hit` when `stop_reason == 'max_tokens'` (What), when any per-item call hits it (Why), or when any stage output tokens reach its limit (How cascade).
+ - For Why, `total_used` is the aggregate over all per-item calls and `max_tokens` is `WHY_ITEM_MAX_TOKENS` × calls made.
   - If the pipeline crashes before the API call completes, show the model ID but use `N/A` for token counts.
   - For the How cascade, `model_id` lists the models actually called in the run (e.g. `claude-haiku-4-5-20251001 + claude-sonnet-4-6`, or just `claude-sonnet-4-6` when every item was pre-structured), `total_used` is the aggregate of all Haiku + Sonnet calls in that run, and `max_tokens` is the sum of the per-call output budgets for the calls made.
 - If the pipeline crashes, send a 🚨 Alert block to Slack with the exception details.
@@ -69,7 +73,7 @@
 - ❗️ Deep read (LLM-flagged) · 🧠 Standard essay · 🗂 Presentation · 🎙 Podcast
 - Header line: `prefix *title* — _author_ · date`
 - Summary as bullet points, source link as final bullet.
-- Source counts per feed before FinOps footer.
+- ⚠️ lines for failed sources and unsummarised items, then source counts per feed, before FinOps footer.
 
 ### How Profile Visual Hierarchy
 - 🛠️ **Tech Stack**: comma-separated tool list.

@@ -62,15 +62,15 @@ A personal intelligence system that scrapes curated tech, crypto, and AI sources
 
 ### `--profile why` — Why does it matter?
 
-**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (articles + podcast transcripts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (investment announcements excluded), One Useful Thing (Ethan Mollick).
+**Sources**: Stratechery (Ben Thompson) via private subscriber RSS (articles + podcast transcripts), DeepLearning.AI (Andrew Ng letters), Ben-Evans (essays + presentations), a16z newsletter (announcements excluded: `Fundraise`-tagged posts, "Investing in / Welcome / Meet the / Announcing / Introducing …" titles, and titles mentioning a16z), One Useful Thing (Ethan Mollick).
 
 **Pre-LLM pipeline**:
-1. Fetch all sources → raw items
-2. Drop items outside a 7-day rolling window. DeepLearning.AI date-only timestamps (no time component) are given a +1 day buffer so articles published on the exact cutoff day aren't inadvertently dropped.
+1. Fetch all sources → raw items. A source that errors, returns nothing, or whose entries all fail to parse is reported as a ⚠️ line in the digest instead of being silently skipped.
+2. Drop items outside an 8-day rolling window (one day of slack for late scheduled runs). Items without a parsable date are skipped. DeepLearning.AI date-only timestamps (no time component) are given a +1 day buffer so articles published on the exact cutoff day aren't inadvertently dropped.
 3. Stratechery deduplication: articles win over podcasts on same title
-4. Claude determines `is_deep_read` from content
+4. Drop items already posted in a previous week (`data/why_seen.json`). This lets the 8-day window overlap the weekly cadence, and lets month-only dates ("Nov 2026") stay in window all month, without repeats. The ledger is updated only after a successful Slack post and committed by the workflow; Stratechery access tokens are stripped from its keys.
 
-**LLM call**: Title, author, content type, full summary (truncated to 1500 chars), and URL included. 1-to-1 mapping — no clustering.
+**LLM calls**: One Sonnet call per item (8,000 output tokens each) with title, author, content type, and text (truncated to 1500 chars). Claude returns only the summary bullets and `is_deep_read`; metadata comes from the fetcher. An item that fails is listed as "Not summarised" and the rest of the digest still posts.
 
 **Slack format**:
 
@@ -164,7 +164,9 @@ For a one-off backfill (e.g. after an outage), run `venv/bin/python catch_how.py
 ```
 main.py                   Entry point — --profile what|why|how
 common.py                 Shared helpers — Anthropic call, Slack post/footer, HTML extraction
-how_pipeline.py           How weekly synthesizer + backlog / seen-ledger state
+why_pipeline.py           Why per-item summariser + Slack digest
+how_pipeline.py           How weekly synthesizer + backlog state
+seen_ledger.py            JSON state helpers + seen-URL ledger (How and Why), URL canonicalisation
 catch_how.py              How daily catcher (no LLM)
 config.py                 Shared constants (keywords, author lists, truncation)
 models.py                 Dataclasses: NewsSignal, WhySignal, HowSignal
@@ -181,6 +183,7 @@ fetchers/
 data/
   how_backlog.json        Persistent How backlog (committed by catcher CI)
   how_seen.json           How seen-URL ledger, pruned to 60 days
+  why_seen.json           Why posted-item ledger (committed by Why CI), pruned to 60 days
 
 .github/workflows/
   what_pipeline.yml       Weekly What pipeline

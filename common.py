@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 import anthropic
@@ -37,6 +38,19 @@ def strip_html(text: str) -> str:
     """Strip HTML tags and collapse whitespace."""
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def strip_code_fences(text: str) -> str:
+    match = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", text, re.S)
+    return match.group(1) if match else text
+
+
+def date_range_str(days: int) -> str:
+    """'Oct 31 – Nov 8' for the window ending now."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    fmt = lambda d: f"{d.strftime('%b')} {d.day}"
+    return f"{fmt(start)} – {fmt(now)}"
 
 
 def preprocess_article(url: str, html_content: str) -> str:
