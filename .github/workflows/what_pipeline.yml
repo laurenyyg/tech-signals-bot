@@ -2,7 +2,7 @@ name: What Pipeline
 
 on:
   schedule:
-    - cron: "47 3 * * 1"  # Sundays 8:47 PM PDT (UTC-7) → Monday 03:47 UTC
+    - cron: "47 22 * * 0"  # Sundays 22:47 UTC (2:47 PM PST / 3:47 PM PDT); DeepSeek off-peak
   workflow_dispatch:
 
 jobs:
