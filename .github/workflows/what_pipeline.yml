@@ -5,6 +5,9 @@ on:
     - cron: "47 22 * * 0"  # Sundays 22:47 UTC (2:47 PM PST / 3:47 PM PDT); DeepSeek off-peak
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -32,3 +35,12 @@ jobs:
           DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
           GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
         run: python main.py --profile what
+
+      - name: Commit and push seen ledger
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/what_seen.json
+          git commit -m "chore: update what_seen.json after successful slack delivery [skip ci]" || echo "No changes to commit"
+          git pull --rebase
+          git push

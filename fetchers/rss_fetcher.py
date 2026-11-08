@@ -12,7 +12,7 @@ import feedparser
 import requests
 
 from common import keyword_pattern, strip_code_fences
-from config import SUMMARY_TRUNCATE_CHARS
+from config import SUMMARY_TRUNCATE_CHARS, WHAT_DAYS_FILTER
 from fetchers.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ _KEYWORD_PATTERNS: List[Tuple[Pattern[str], int]] = [
 ]
 
 TOP_N = 40
-DAYS_FILTER = 7
+DAYS_FILTER = WHAT_DAYS_FILTER
 
 # Mimic a real browser so some RSS hosts don't silently return empty feeds.
 USER_AGENT = (
@@ -361,21 +361,28 @@ def _source_label(source: str) -> str:
     return f"*{source.capitalize()}*"
 
 
-def funnel_line(source: str, counts: Dict[str, int]) -> str:
-    """'📡 *Techmeme*   40 fetched › 12 in last 7d › …' or '📡 *Techmeme*   fetch failed'."""
+def funnel_line(
+    source: str, counts: Dict[str, int], window_days: int = DAYS_FILTER
+) -> str:
+    """'📡 *Techmeme*   40 fetched › 12 in last 8d › …' or '📡 *Techmeme*   fetch failed'."""
     label = _source_label(source)
     if counts.get("fetch_failed"):
         return f"📡 {label}   fetch failed"
-    return (
+    line = (
         f"📡 {label}   "
         f"{counts.get('fetched', 0)} fetched  ›  "
-        f"{counts.get('in_window', 0)} in last {DAYS_FILTER}d  ›  "
+        f"{counts.get('in_window', 0)} in last {window_days}d  ›  "
         f"{counts.get('relevant', 0)} relevant  ›  "
         f"{counts.get('sent_to_llm', 0)} sent to LLM"
     )
+    if counts.get("already_posted"):
+        line += f"  ({counts['already_posted']} already posted)"
+    return line
 
 
-def funnel_lines(source_counts: Dict[str, Dict[str, int]]) -> List[str]:
+def funnel_lines(
+    source_counts: Dict[str, Dict[str, int]], window_days: int = DAYS_FILTER
+) -> List[str]:
     """One line per active or failed source; zero-in-window sources share a quiet line.
 
     Failed fetches never fold, even when in_window is 0.
@@ -390,7 +397,7 @@ def funnel_lines(source_counts: Dict[str, Dict[str, int]]) -> List[str]:
             quiet.append(source)
             quiet_fetched += counts.get("fetched", 0)
         else:
-            lines.append(funnel_line(source, counts))
+            lines.append(funnel_line(source, counts, window_days))
     if quiet:
         names = ", ".join(_source_label(s) for s in quiet)
         lines.append(f"📡 quiet: {names}  ({quiet_fetched} fetched, 0 in window)")
@@ -398,11 +405,13 @@ def funnel_lines(source_counts: Dict[str, Dict[str, int]]) -> List[str]:
 
 
 class RssFetcher(BaseFetcher):
-    def __init__(self) -> None:
+    def __init__(self, cutoff: Optional[datetime] = None) -> None:
         # Populated during fetch(). Each source maps to a dict of stage → count:
-        # fetched, in_window, relevant (unique score>0 after dedupe), sent_to_llm (after top-N cut).
+        # fetched, in_window, relevant (score>0 after dedupe). sent_to_llm and
+        # already_posted are filled in main after the seen ledger and top-N cut.
         self.source_counts: Dict[str, Dict[str, int]] = {}
         self.source_errors: Dict[str, str] = {}
+        self.cutoff = cutoff
         proxy_url = os.getenv("DATAIMPULSE_PROXY_URL")
         self._proxy_handler = (
             urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
@@ -410,12 +419,20 @@ class RssFetcher(BaseFetcher):
         )
 
     def fetch(self) -> List[Dict[str, Any]]:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
+        cutoff = self.cutoff if self.cutoff is not None else (
+            datetime.now(timezone.utc) - timedelta(days=DAYS_FILTER)
+        )
         all_items: List[Dict[str, Any]] = []
         self.source_errors = {}
 
         stage_counts: Dict[str, Dict[str, int]] = {
-            source: {"fetched": 0, "in_window": 0, "relevant": 0, "sent_to_llm": 0}
+            source: {
+                "fetched": 0,
+                "in_window": 0,
+                "relevant": 0,
+                "sent_to_llm": 0,
+                "already_posted": 0,
+            }
             for source in WHAT_SOURCES
         }
 
@@ -461,24 +478,20 @@ class RssFetcher(BaseFetcher):
 
         all_items = [item for item in all_items if item["score"] > 0]
         all_items.sort(key=lambda x: x["score"], reverse=True)
-        top_items = all_items[:TOP_N]
-
-        for item in top_items:
-            stage_counts[item["source"]]["sent_to_llm"] += 1
+        # Top-N is applied in main after the seen ledger, so last week's items
+        # do not occupy the 40 slots sent to Sonnet.
 
         logger.info(
-            f"Scored {len(all_items)} total items across all feeds; "
-            f"keeping top {len(top_items)} (score threshold: "
-            f"{top_items[-1]['score'] if top_items else 'n/a'}); "
+            f"Scored {len(all_items)} relevant item(s) across all feeds; "
             f"{len(self.source_errors)} source(s) failed"
         )
-        for item in top_items:
+        for item in all_items:
             logger.debug(
                 f"  [{item['score']:>3}] [{item['source'].upper()}] {item['title']}"
             )
 
         self.source_counts = stage_counts
-        return top_items
+        return all_items
 
     def _fetch_anthropic_page(
         self,

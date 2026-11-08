@@ -1,6 +1,6 @@
 """Unit tests for What-profile RSS helpers (mocked feeds only, no live HTTP)."""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import feedparser
@@ -174,12 +174,20 @@ def test_funnel_lines_folds_quiet_keeps_failed() -> None:
         "📡 *Openai_news*   fetch failed"
     )
     lines = funnel_lines(counts)
+    assert "in last 8d" in lines[0]
     assert lines[0].startswith("📡 *Techmeme*")
     assert "*Openai_news*   fetch failed" in lines[1]
     assert lines[-1] == (
         "📡 quiet: *Techcrunch*, *Anthropic_news*, *Anthropic_research*"
         "  (43 fetched, 0 in window)"
     )
+    stretched = funnel_line(
+        "techmeme",
+        {"fetched": 40, "in_window": 12, "relevant": 8, "sent_to_llm": 4, "already_posted": 4},
+        window_days=14,
+    )
+    assert "in last 14d" in stretched
+    assert "(4 already posted)" in stretched
 
 
 def _story(title: str, score: int, source: str = "techmeme") -> dict:
@@ -220,3 +228,36 @@ def test_apply_semantic_groups_keeps_higher_score() -> None:
     assert len(out) == 2
     assert out[0]["score"] == 10 and out[0]["source"] == "openai_news"
     assert out[1]["title"] == "Unrelated TSMC note"
+
+
+def test_fetch_cutoff_floors_stretches_and_caps() -> None:
+    from main import fetch_cutoff
+
+    now = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    floor = now - timedelta(days=8)
+    assert fetch_cutoff([], now) == floor
+
+    recent = [{"url": "https://x/a", "processed_at": (now - timedelta(days=3)).isoformat()}]
+    assert fetch_cutoff(recent, now) == floor
+
+    gap = [{"url": "https://x/a", "processed_at": (now - timedelta(days=14)).isoformat()}]
+    assert fetch_cutoff(gap, now) == now - timedelta(days=14)
+
+    stale = [{"url": "https://x/a", "processed_at": (now - timedelta(days=40)).isoformat()}]
+    assert fetch_cutoff(stale, now) == now - timedelta(days=14)
+    assert fetch_cutoff([{"url": "https://x/a", "processed_at": "not-a-date"}], now) == floor
+
+
+def test_drop_seen_uses_canonical_url() -> None:
+    from main import drop_seen, ledger_key
+
+    posted = _story("OpenAI GPT-5", 5)
+    posted["link"] = "https://techcrunch.com/gpt5/?utm_source=feed"
+    fresh_item = _story("TSMC 2nm", 3, "techcrunch")
+    seen = {ledger_key(posted)}
+    fresh, dropped = drop_seen(
+        [{**posted, "link": "https://techcrunch.com/gpt5/"}, fresh_item],
+        seen,
+    )
+    assert [i["title"] for i in dropped] == ["OpenAI GPT-5"]
+    assert [i["title"] for i in fresh] == ["TSMC 2nm"]
