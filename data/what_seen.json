@@ -134,5 +134,45 @@
   {
     "url": "https://openai.com/index/daybreak-red-aws-govcloud",
     "processed_at": "2026-11-08T10:29:16.548886+00:00"
+  },
+  {
+    "url": "https://www.anthropic.com/research/investigating-vault-particles-with-claude",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.techmeme.com/261108/p10",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.techmeme.com/261108/p8",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.anthropic.com/research/components-of-agent-memory",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.anthropic.com/research/how-researchers-use-claude",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.techmeme.com/261108/p16",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://techcrunch.com/2026/11/08/coordinated-disturbances-haunt-grids-worldwide-heres-how-researchers-solved-the-mystery",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.techmeme.com/261108/p19",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.techmeme.com/261108/p7",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
+  },
+  {
+    "url": "https://www.anthropic.com/research/provable-inference",
+    "processed_at": "2026-11-09T02:04:04.685176+00:00"
   }
 ]
