@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "title": "Create an Immersive AI Language Tutor",
+    "link": "https://www.chatprd.ai/how-i-ai/workflows/create-an-immersive-ai-language-tutor",
+    "summary": "Build a voice-first language practice app that forces immersion by refusing to switch to the user's native language. The AI tutor provides corrections in real-time, within the flow of the conversation, to simulate an authentic learning environment.",
+    "published": "2026-11-09T12:00:00Z",
+    "source": "ChatPRD",
+    "episode": "https://www.chatprd.ai/how-i-ai/william-imoh-built-a-norwegian-tutor-that-refuses-to-speak-english",
+    "body": "Create an Immersive AI Language Tutor\nBuild a voice-first language practice app that forces immersion by refusing to switch to the user's native language. The AI tutor provides corrections in real-time, within the flow of the conversation, to simulate an authentic learning environment.\n\nTools: Codex\nInputs:\n- Access to a real-time voice AI model API.\n- A system prompt defining the tutor's persona and rules.\n- A target language for tutoring.\nSteps:\n1. Define the Core Immersion Rule in a System Prompt: The most important feature is the tutor's refusal to break immersion. This behavior must be explicitly defined in the instructions for the language model.\n2. Implement Real-Time Voice Interaction: Use a real-time voice model to create a fluid, conversational experience. The goal is to minimize latency so it feels like talking to a person, not a machine.\n3. Test the In-Context Correction: Engage in a conversation and intentionally make a common grammatical error. Verify that the AI corrects you and seamlessly continues the conversation.\n4. Test the Refusal to Switch Languages: Explicitly ask the tutor to switch to your native language. Repeat the request to ensure the rule is being enforced consistently.\nOutcome: A functional voice application where an AI tutor converses in a target language, provides in-context corrections, and refuses to switch to English.",
+    "kind": "howto"
+  },
+  {
+    "title": "How to Manage Business Operations with Role-Based AI Agents",
+    "link": "https://www.chatprd.ai/how-i-ai/workflows/how-to-manage-business-operations-with-role-based-ai-agents",
+    "summary": "Organize your business operations by creating a 'fellowship' of specialized AI agents. This workflow shows how to silo responsibilities into projects and assign distinct roles to AI assistants to automate administrative tasks and context retrieval.",
+    "published": "2026-11-09T12:00:00Z",
+    "source": "ChatPRD",
+    "episode": "https://www.chatprd.ai/how-i-ai/william-imoh-built-a-norwegian-tutor-that-refuses-to-speak-english",
+    "body": "How to Manage Business Operations with Role-Based AI Agents\nOrganize your business operations by creating a 'fellowship' of specialized AI agents. This workflow shows how to silo responsibilities into projects and assign distinct roles to AI assistants to automate administrative tasks and context retrieval.\n\nTools: ChatGPT, Codex, Notion\nInputs:\n- A list of all business functions and responsibilities.\n- Access to an AI platform that supports projects or separate contexts.\n- API or direct access to company tools (e.g., Google Suite, Notion, Linear).\nSteps:\n1. Inventory Your Responsibilities: Before automating, you must know what you do. Create an exhaustive list of all your business roles and recurring tasks.\n2. Create Siloed Projects for Each Function: In a tool like ChatGPT or Codex, create a separate project for each major business area (e.g., 'Operations,' 'Sales,' 'Growth'). This helps organize context by task; check your assistant’s actual memory and project settings before assuming isolation.\n3. Define and Assign Agent Roles: Create distinct personas for agents that correspond to business functions. Start by creating a 'chief of staff' agent and instructing it to define the others.\n4. Grant Contextual Access to Your Tools: Connect your agents to your company's systems of record, such as Google Suite, Notion, Linear, and QuickBooks. This allows them to retrieve information autonomously.\n5. Delegate a Context-Rich Task: Test the system by giving a high-level command that requires the agent to access multiple sources and perform an action.\nOutcome: An operational system where distinct AI agents manage specific business functions, capable of retrieving information and executing tasks with high-level commands.",
+    "kind": "howto"
+  },
+  {
+    "title": "Build a Native Mobile App with AI and Clear Product Direction",
+    "link": "https://www.chatprd.ai/how-i-ai/workflows/build-native-mobile-app-ai-product-direction",
+    "summary": "Use Codex to help build a native mobile app, then guide the design and review the resulting code. William brought web-development and product experience to the project.",
+    "published": "2026-11-09T12:00:00Z",
+    "source": "ChatPRD",
+    "episode": "https://www.chatprd.ai/how-i-ai/william-imoh-built-a-norwegian-tutor-that-refuses-to-speak-english",
+    "body": "Build a Native Mobile App with AI and Clear Product Direction\nUse Codex to help build a native mobile app, then guide the design and review the resulting code. William brought web-development and product experience to the project.\n\nTools: Codex\nInputs:\n- A clear product concept and user experience goal.\n- Specific design vocabulary and visual references.\n- Product and engineering experience, or access to an experienced reviewer for architecture, security and testing.\nSteps:\n1. Write a Detailed Kickoff Prompt: Begin by writing a comprehensive prompt that describes the application's purpose, target user, and desired experience. This is the most critical step, as it sets the foundation for the entire project.\n2. Inspect and Critique the First Version: Ask the AI to generate an initial version of the app. Your job is to act as the product owner and designer, identifying what doesn't align with your vision.\n3. Refine with Specific Design Vocabulary: Provide corrective feedback to the AI using precise language. This is where having a design vocabulary is more important than knowing how to code.\n4. Request Core Functionality and Constraints: Once the visual design is closer to your goal, prompt the AI to implement the core logic and any unique behavioral rules that define your app.\nOutcome: The generated source code for a native mobile application that aligns with the specified design and functionality.",
+    "kind": "howto"
+  }
+]
